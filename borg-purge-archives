@@ -1,0 +1,661 @@
+#!/bin/bash
+
+#
+# borg archive purge script
+#   Uses a parsed date in the archive name, opposed to the date stored in the
+#   borg db for when it was created, which `borg --purge` uses.
+#
+# reg/20190329
+VERSION="1.0"
+#####
+# Configuration
+#
+BORG_CMD="/usr/bin/borg"
+[ -x "$BORG_CMD" ] || BORG_CMD="$(which borg 2>/dev/null)"
+# Peroid of days, starting from today, to analyze for archiving.
+# Each starts from 0 to the day given
+KEEP_DAYS=90
+KEEP_WEEKS=185
+KEEP_MONTHS=366
+KEEP_YEARS=3660
+# Preferred day of saved archive to keep
+KEEP_WEEK_DAY=1  # Monday
+KEEP_MONTH_DAY=1
+KEEP_YEAR_DAY=1
+# Threshold of days, before/after preferred day, to choose an archive for saving
+PURGE_WEEK_THRESHOLD=6
+PURGE_MONTH_THRESHOLD=27
+PURGE_YEAR_THRESHOLD=352
+#####
+# Defaults set with command-line arguments
+VERBOSE=0
+DRY_RUN=0
+SIM_POPULATE=0
+
+FLAG_CONTROL_C=0
+
+# trap ctrl-c and call ctrl_c()
+trap ctrl_c INT
+
+function ctrl_c() {
+    echo "** Trapped CTRL-C"
+    FLAG_CONTROL_C=1
+    exit 1
+}
+
+echo_v () {
+    [[ $VERBOSE -ge 1 ]] || return 0
+    local VL=1
+    if [[ "$1" =~ ^[0-9]{1}$ ]]; then
+        VL=$1
+        shift
+    fi
+    if [[ $VL -le $VERBOSE ]]; then
+        echo $*
+    fi
+}
+
+echo_t () {
+    if [[ $DRY_RUN -eq 1 ]]; then
+        echo "[TEST] "$*
+    fi
+}
+
+echo_e () {
+    local MSG=$*
+    ( >&2 echo "[ERROR] "$MSG )
+}
+
+helpmsg () {
+  echo "  borg-purge-archives version $VERSION"
+cat<<'HELPEOF'
+
+  This program will purge archives from a Borg Backup repository based on
+  archival dates set in the archive name, e.g. archive-2019-08-01, rather than
+  the actual timestamp recorded by borg for when the archive was created.
+
+  The `borg --purge` performs purge operations based on the recorded timestamp
+  which is not desired if multiple-day archives are created on a single day,
+  or created on an a day that differs from the content in the archive.
+
+    --help              This help message
+    --verbose [0-9]     Set the verbosity level
+    --test		Show what would happen without doing it
+                          this sets VERBOSE=1 if not set with --verbose
+    --repositiory <dir> (required) The Borg repository to purge from
+    --prefix <string>   (required) The name prefix of the archives to consider
+    --borg-base-dir=v   Set the BORG_BASE_DIR environment variable. This
+                          directory is where borg looks for the .cache/ and
+                          .config/ directories for the repository.
+    --borg-command=v    Set the path to borg and any other parameters that are
+                          desired to be passed in
+    # Simulation testing does not require any other arguments, unless the
+    # simulate directory will be populated with --sim-populate. However, the
+    # --verbose and --test flags are evaluated for simulation runs.
+    --simulate <dir>    Perform the purge on a directory containing files
+                          that are named as the archive names. This can be
+                          populated manually, or with --sim-populate
+    --sim-populate      Populate the --simulate directory with empty files
+                          named after each archive in the borg repository, then
+                          exit. The simulate directory must exist. The --prefix
+                          arg is not used, but --repository must be provided.
+
+HELPEOF
+
+#HIDDEN
+#  Populate a simulation directory using the following script
+#
+#TODAY=$(date +%Y-%m-%d)
+#LASTDAY="2018-10-03"
+#FPREFIX="archive-daily-"
+#SIM_DIR="borgtest"
+#
+#for i in {0..1000}; do
+#    TDATE=$(date -d "$TODAY -$i day" +%Y-%m-%d)
+#    if [ -f "$SIM_DIR/${FPREFIX}${TDATE}" ]; then
+#        continue
+#    fi
+#    touch $SIM_DIR/${FPREFIX}${TDATE}
+#    if [[ $TDATE = $LASTDAY ]]; then
+#        break
+#    fi
+#done
+}
+
+sim_populate () {
+  if [ -z "$SIM_DIR" ]; then
+    echo_e "The simulation directory was not specified."
+    exit 1
+  elif [ ! -d "$SIM_DIR" ]; then
+    echo_e "The simulation directory \"$SIM_DIR\" does not exist."
+    exit 1
+  fi
+  A=0
+  C=0
+  BORG_PATH=$(echo $BORG_CMD | sed -r 's/^(.*borg)\s?.*/\1/')
+  if [ ! -x "$BORG_PATH" ]; then echo_e "Where is $BORG_CMD"; return 1; fi
+  for archive in $($BORG_CMD list --short ${BORG_REPO} | sort --reverse); do
+      if [ ! -f "$SIM_DIR/$archive" ]; then
+        touch $SIM_DIR/$archive
+        let C++
+      fi
+      let A++
+  done
+  echo_v "[SIMULATION] Touched $C out of $A archives"
+}
+
+while [[ $1 == -* ]]; do
+  ARG=$1
+  if [ "$ARG" == "--test" ]; then
+    DRY_RUN=1
+    VERBOSE=${VERBOSE:-1}
+    shift
+  elif [ "$ARG" == "--verbose" ]; then
+    VERBOSE=1
+    shift
+    if [[ ! $1 == -* ]] && [[ "$1" =~ [0-9]{1} ]]; then
+        VERBOSE=$1
+        shift
+    fi
+  elif [ "$ARG" == "--simulate" ]; then
+    SIMULATE=1
+    shift
+    SIM_DIR=$1
+    shift
+    if [ ! -d "$SIM_DIR" ]; then
+        echo_e "The directory for running simulation does not exist: $SIM_DIR"
+        exit 1
+    fi
+  elif [ "$ARG" == "--sim-populate" ]; then
+    shift
+    SIM_POPULATE=1
+  elif [ "$ARG" == "--borg-base-dir" ]; then
+    shift
+    BORG_BASE_DIR="$1"
+    if [ ! -d "$BORG_BASE_DIR/.cache" ] || [ ! -d "$BORG_BASE_DIR/.config" ]; then
+        echo_e "[WARN] one or both of .cache and .config not found in [BORG_BASE_DIR]$BORG_BASE_DIR"
+    fi
+    export BORG_BASE_DIR
+    shift
+  elif [ "$ARG" == "--borg-command" ]; then
+    shift
+    BORG_CMD="$1"
+    shift
+  elif [ "$ARG" == "--repository" ]; then
+    shift
+    BORG_REPO="$1"
+    if [ ! -d "$BORG_REPO" ]; then
+        echo_e "Check --repository parameter for a valid borg repository"
+    fi
+    shift
+  elif [ "$ARG" == "--prefix" ]; then
+    shift
+    PREFIX="$1"
+    shift
+  elif [ "$ARG" == "--help" ]; then
+    helpmsg
+    exit 1
+  elif [ "$ARG" == "--" ]; then
+    shift
+    break
+  else
+    echo_e "Unrecognized argument: "$ARG
+    exit 1
+  fi
+done
+
+# Check
+if [ -z "$BORG_CMD" ]; then
+  echo_e "Borg command not found. Put borg in your PATH, or use --borg-command."
+  helpmsg
+  exit 1
+else
+  BORG_PATH=$(echo $BORG_CMD | sed -r 's/^(.*borg)\s?.*/\1/')
+  if [ ! -f "$BORG_PATH" ]; then
+    echo_e "Borg command \"$BORG_PATH\" (from $BORG_CMD) is not found."
+    helpmsg
+    exit 1
+  elif [ ! -x "$BORG_PATH" ]; then
+    echo_e "Borg command \"$BORG_PATH\" (from $BORG_CMD) is not executable."
+    helpmsg
+    exit 1
+  fi
+fi
+
+if [[ $SIM_POPULATE = 1 ]]; then
+  sim_populate
+  exit 0
+fi
+
+if [ -z "$BORG_REPO" ] || [ ! -d "$BORG_REPO" ]; then
+  echo_e "The --repository argument is required."
+  helpmsg
+  exit 1
+elif [ -z "$PREFIX" ]; then
+  echo_e "The --prefix argument is required."
+  helpmsg
+  exit 1
+fi
+
+#
+# Get the number of days ago the archive was created
+#
+get_daysago () {
+    ARCHIVE=$1
+
+    if [[ "${ARCHIVE}" =~ ^${PREFIX}.*$ ]]; then
+        thisdate=${ARCHIVE: -10}
+        if [[ ! "$thisdate" =~ [0-9]{4}\-[0-9]{2}\-[0-9]{2} ]]; then
+            return 1
+        fi
+        echo $(( ( $(date +%s) - $(date -d "$thisdate" +%s) ) /(24 * 60 * 60 ) ))
+    fi
+    return 1
+}
+
+do_borg_archive_list () {
+    if [[ $SIMULATE -eq 1 ]]; then
+        ls -1 $SIM_DIR/ | sort --reverse
+        return $?
+    fi
+
+    # borg list --prefix ${PREFIX} --short ${BORG_REPO}
+    $BORG_CMD list --short ${BORG_REPO} | sort --reverse
+}
+
+do_borg_archive_exists () {
+    ARCHIVE=$1
+    if [[ $SIMULATE -eq 1 ]]; then
+        if [ -f $SIM_DIR/$ARCHIVE ]; then
+             return 0
+        fi
+        return 1
+    fi
+
+    if [[ $($BORG_CMD list --short --prefix $ARCHIVE $BORG_REPO | wc -l) -ge 1 ]]; then
+        return 0
+    fi
+    return 1
+}
+
+do_borg_delete_archive () {
+    ARCHIVE=$1
+    if do_borg_archive_exists $ARCHIVE ; then
+        if [ $DRY_RUN -eq 1 ]; then
+            if [[ $SIMULATE -eq 1 ]]; then
+                echo_t "rm -v $SIM_DIR/$ARCHIVE"
+                return 0
+            fi
+            echo_t "$BORG_CMD delete $BORG_REPO::$ARCHIVE"
+        else
+            if [[ $SIMULATE -eq 1 ]]; then
+                local FLAG=""
+                [[ $VERBOSE -eq 1 ]] && FLAG="-v"
+                rm $FLAG $SIM_DIR/$ARCHIVE
+                return $?
+            fi
+            $BORG_CMD delete $BORG_REPO::$ARCHIVE
+            if [[ "$?" -ge 1 ]]; then
+                echo_e "Failure: $BORG_CMD delete $BORG_REPO::$ARCHIVE"
+            fi
+        fi
+        return 0
+    else
+        echo_e "Archive $ARCHIVE does not exist in the borg repository."
+        return 1
+    fi
+}
+
+#
+# Decision Code
+#
+
+CANDIDATE_WEEKLY=""
+CANDIDATE_MONTHLY=""
+CANDIDATE_YEARLY=""
+LAST_SAVED_ARCHIVE=""
+LAST_ARCHIVE_DAY=0
+NEXT_ARCHIVE_DAY=0
+LAST_ARCHIVE_WEEK=0
+NEXT_ARCHIVE_WEEK=0
+LAST_ARCHIVE_MONTH=0
+NEXT_ARCHIVE_MONTH=0
+LAST_ARCHIVE_YEAR=0
+NEXT_ARCHIVE_YEAR=0
+
+do_analyze_delete () {
+    local ARCHIVE=$1
+    if    [ ! "$ARCHIVE" = "$CANDIDATE_WEEKLY" ] \
+       && [ ! "$ARCHIVE" = "$CANDIDATE_MONTHLY" ] \
+       && [ ! "$ARCHIVE" = "$CANDIDATE_YEARLY" ] \
+       && [ "$ARCHIVE" '<' "$LAST_SAVED_ARCHIVE" ]; then
+        echo_v "[Purge] "$ARCHIVE
+        do_borg_delete_archive $ARCHIVE
+    else
+        if [ "$ARCHIVE" = "$CANDIDATE_WEEKLY" ]; then
+            echo_v 8 "[No Purge] $ARCHIVE is the weekly candidate"
+        elif [ "$ARCHIVE" = "$CANDIDATE_MONTHLY" ]; then
+            echo_v 8 "[No Purge] $ARCHIVE is the monthly candidate"
+        elif [ "$ARCHIVE" = "$CANDIDATE_YEARLY" ]; then
+            echo_v 8 "[No Purge] $ARCHIVE is the yearly candidate"
+        elif [ "$ARCHIVE" = "$LAST_SAVED_ARCHIVE" ]; then
+            echo_v 8 "[No Purge] $ARCHIVE is the last saved archive"
+        elif [ ! "$ARCHIVE" '<' "$LAST_SAVED_ARCHIVE" ]; then
+            echo_v 9 "[No Purge] $ARCHIVE is older than the last saved archive $LAST_SAVED_ARCHIVE."
+        else
+            echo_v 4 "[No Purge] $ARCHIVE, for unknown reason"
+        fi
+    fi
+}
+
+do_analyze_keep () {
+    local TYPE=$1    # daily, weekly, monthly, yearly
+    local ARCHIVE=$2
+    local OLD_CANDIDATE=""
+    if [ "$TYPE" = "weekly" ]; then
+        OLD_CANDIDATE=$CANDIDATE_WEEKLY
+        CANDIDATE_WEEKLY=$ARCHIVE
+    elif [ "$TYPE" = "monthly" ]; then
+        OLD_CANDIDATE=$CANDIDATE_MONTHLY
+        CANDIDATE_MONTHLY=$ARCHIVE
+    elif [ "$TYPE" = "yearly" ]; then
+        OLD_CANDIDATE=$CANDIDATE_YEARLY
+        CANDIDATE_YEARLY=$ARCHIVE
+    fi
+    [ ! -z "$OLD_CANDIDATE" ] && do_analyze_delete $OLD_CANDIDATE
+    echo_v 3 "[Keep] $ARCHIVE ($TYPE)"
+}
+
+do_analyze_save () {
+    local TYPE=$1    # daily, weekly, monthly, yearly
+    local ARCHIVE=$2
+    #
+    # handle keep cleanup
+    #
+    # Unkeep the candidate, if we are not saving the candidate archive
+    if [ "$TYPE" = "weekly"  ] && [ ! "$ARCHIVE" = "$CANDIDATE_WEEKLY" ]; then
+        do_analyze_keep weekly ""
+    elif [ "$TYPE" = "monthly"  ] && [ ! "$ARCHIVE" = "$CANDIDATE_MONTHLY" ]; then
+        do_analyze_keep monthly ""
+    elif [ "$TYPE" = "yearly"  ] && [ ! "$ARCHIVE" = "$CANDIDATE_YEARLY" ]; then
+        do_analyze_keep yearly ""
+    fi
+    # mark archive being saved
+    LAST_SAVED_ARCHIVE=$ARCHIVE
+    LAST_DAYSAGO=$(get_daysago $LAST_SAVED_ARCHIVE)
+    # Unset the candidate, if we are saving the candidate archive
+    if [ "$ARCHIVE" = "$CANDIDATE_WEEKLY" ]; then
+        CANDIDATE_WEEKLY=""
+        LAST_ARCHIVE_WEEK=$LAST_DAYSAGO
+    fi
+    if [ "$ARCHIVE" = "$CANDIDATE_MONTHLY" ]; then
+        CANDIDATE_MONTHLY=""
+        LAST_ARCHIVE_MONTH=$LAST_DAYSAGO
+    fi
+    if [ "$ARCHIVE" = "$CANDIDATE_YEARLY" ]; then
+        CANDIDATE_YEARLY=""
+        LAST_ARCHIVE_YEAR=$LAST_DAYSAGO
+    fi
+    #
+    # handle save
+    #
+    [ "$TYPE" = "daily"   ] && LAST_ARCHIVE_DAY=$LAST_DAYSAGO   && do_adjust_dates_day   $NEXT_ARCHIVE_DAY
+    [ "$TYPE" = "weekly"  ] && LAST_ARCHIVE_WEEK=$LAST_DAYSAGO  && do_adjust_dates_week  $NEXT_ARCHIVE_WEEK
+    [ "$TYPE" = "monthly" ] && LAST_ARCHIVE_MONTH=$LAST_DAYSAGO && do_adjust_dates_month $NEXT_ARCHIVE_MONTH
+    [ "$TYPE" = "yearly"  ] && LAST_ARCHIVE_YEAR=$LAST_DAYSAGO  && do_adjust_dates_year  $NEXT_ARCHIVE_YEAR
+    echo_v 2 "[Save] "$LAST_SAVED_ARCHIVE" ("$TYPE")["$LAST_DAYSAGO"]"
+}
+
+do_adjust_dates_day () {
+    local DAYSAGO=$1
+    NEXT_ARCHIVE_DAY=$(( $DAYSAGO + 1 ))
+}
+
+do_adjust_dates_week () {
+    local DAYSAGO=$1
+    local week_day_now=$(date -d"-$DAYSAGO days" +%u)
+    if [[ $week_day_now -le $KEEP_WEEK_DAY ]]; then
+        # need to evaluate previous week
+        NEXT_ARCHIVE_WEEK=$(( $DAYSAGO + $week_day_now + 7 - $KEEP_WEEK_DAY ))
+    else
+        # evaluate the current week
+        NEXT_ARCHIVE_WEEK=$(( $DAYSAGO + $week_day_now - $KEEP_WEEK_DAY ))
+    fi
+}
+
+do_adjust_dates_month () {
+    local DAYSAGO=$1
+    local month_num=$(date -d"-$DAYSAGO days" +%m)
+    local month_day_now=$(date -d"-$DAYSAGO days" +%_d)
+    if [[ $month_day_now -le $KEEP_MONTH_DAY ]]; then
+        # need to evaluate previous month
+        local month_day_last=$(date -d"${month_num}/1 -1 day" +%d)
+        NEXT_ARCHIVE_MONTH=$(( $DAYSAGO + $month_day_now + $month_day_last - $KEEP_MONTH_DAY ))
+    else
+        # evaluate the current month
+        local month_day_last=$(date -d"${month_num}/1 +1 month -1 day" +%d)
+        NEXT_ARCHIVE_MONTH=$(( $DAYSAGO + $month_day_now - $KEEP_MONTH_DAY ))
+    fi
+}
+
+do_adjust_dates_year () {
+    local DAYSAGO=$1
+    local year_num=$(date -d"-$DAYSAGO days" +%Y)
+    local year_day_now=$(date -d"-$DAYSAGO days" +%_j)
+    if [[ $year_day_now -le $KEEP_YEAR_DAY ]]; then
+        # need to evaluate previous year
+        local year_day_last=$(date -d"january 1 ${year_num} -1 day" +%j)
+        NEXT_ARCHIVE_YEAR=$(( $DAYSAGO + $year_day_now + $year_day_last - $KEEP_YEAR_DAY ))
+    else
+        # evaluate the current year
+        local year_day_last=$(date -d"january 1 ${year_num} +1 year -1 day" +%j)
+        NEXT_ARCHIVE_YEAR=$(( $DAYSAGO + $year_day_now - $KEEP_YEAR_DAY ))
+    fi
+}
+
+do_adjust_dates () {
+    local DAYSAGO=$1
+    do_adjust_dates_day   $DAYSAGO
+    do_adjust_dates_week  $DAYSAGO
+    do_adjust_dates_month $DAYSAGO
+    do_adjust_dates_year  $DAYSAGO
+}
+
+is_same_year () {
+    local DAYSAGO=$1
+    local ARCHIVE=$2
+    local A_DAYSAGO=$(get_daysago $ARCHIVE)
+    if [[ $(date -d"-$DAYSAGO days" +%_Y) = $(date -d"-$A_DAYSAGO days" +%_Y) ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+is_same_week () {
+    local DAYSAGO=$1
+    local ARCHIVE=$2
+    local A_DAYSAGO=$(get_daysago $ARCHIVE)
+    if ! is_same_year $DAYSAGO $ARCHIVE ; then
+        return 1
+    fi
+    if [[ $(date -d"-$DAYSAGO days" +%U) = $(date -d"-$A_DAYSAGO days" +%U) ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+is_same_month () {
+    local DAYSAGO=$1
+    local ARCHIVE=$2
+    local A_DAYSAGO=$(get_daysago $ARCHIVE)
+    if ! is_same_year $DAYSAGO $ARCHIVE ; then
+        return 1
+    fi
+    if [[ $(date -d"-$DAYSAGO days" +%_m) = $(date -d"-$A_DAYSAGO days" +%_m) ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+run_cycle_candidates () {
+    DAYSAGO=$1
+    if [[ $DAYSAGO -le $KEEP_YEARS ]]; then
+        if [[ $DAYSAGO -ge $NEXT_ARCHIVE_YEAR ]] && is_same_year $DAYSAGO $ARCHIVE ; then
+            do_analyze_save yearly $CANDIDATE_YEARLY
+        fi
+    fi
+
+    if [[ $DAYSAGO -le $KEEP_MONTHS ]]; then
+        if [[ $DAYSAGO -ge $NEXT_ARCHIVE_MONTH ]] && [ ! -z "$CANDIDATE_MONTHLY" ]; then
+            do_analyze_save monthly $CANDIDATE_MONTHLY
+        fi
+    fi
+
+    if [[ $DAYSAGO -le $KEEP_WEEKS ]]; then
+        if [[ $DAYSAGO -ge $NEXT_ARCHIVE_WEEK ]] && [ ! -z "$CANDIDATE_WEEKLY" ]; then
+            do_analyze_save weekly $CANDIDATE_WEEKLY
+        fi
+    fi
+}
+
+#
+# This loop expects the archive to be formatted as "$PREFIX-YYYY-MM-DD"
+#   e.g.: archive-daily-2018-10-03
+# And the list looped through is expected to be provided in reverse
+#   e.g.: 27 25 22 21 etc.., opposed to 21 22 25 27
+#
+INITIALIZED=0
+PREV_DAYSAGO=$DAYSAGO
+for ARCHIVE in $(do_borg_archive_list) ; do
+    echo_v 6 "Considering: $ARCHIVE"
+    if [[ $FLAG_CONTROL_C = 1 ]]; then
+        last
+    fi
+
+    if [[ ! "${ARCHIVE}" =~ ^${PREFIX}.*$ ]]; then
+        echo_e "Rejected prefix: "$PREFIX" not matched in "$ARCHIVE
+        continue
+    fi
+
+    DAYSAGO=$(get_daysago $ARCHIVE)
+    if [ -z "$DAYSAGO" ]; then
+        echo_e "Rejected date: in "$ARCHIVE
+        continue
+    fi
+    ymd=$(echo $ARCHIVE | cut -d"-" -f 3-);
+
+    if [[ ! $INITIALIZED = 1 ]]; then
+        PREV_DAYSAGO=$DAYSAGO
+        do_adjust_dates $DAYSAGO
+        INITIALIZED=1
+    fi
+
+    if [[ $(( $PREV_DAYSAGO + 1 )) -lt $DAYSAGO ]]; then
+        for day_i in $(seq $(($PREV_DAYSAGO + 1)) $(($DAYSAGO - 1)) ); do
+            echo_v 5 "[CYCLE] run_cycle_candidates $day_i"
+            run_cycle_candidates $day_i
+        done
+    fi
+
+    echo_v 7 " (( [${DAYSAGO}]NEXT: "$NEXT_ARCHIVE_DAY", "$NEXT_ARCHIVE_WEEK", "$NEXT_ARCHIVE_MONTH", "$NEXT_ARCHIVE_year" == $ARCHIVE ))"
+
+    if [[ $DAYSAGO -le $KEEP_DAYS ]]; then
+        do_analyze_save daily $ARCHIVE
+        do_adjust_dates_day $DAYSAGO
+        do_adjust_dates_week $DAYSAGO
+        do_adjust_dates_month $DAYSAGO
+        do_adjust_dates_year $DAYSAGO
+    fi
+
+    if [[ $DAYSAGO -le $KEEP_YEARS ]]; then
+        if [[ $DAYSAGO -eq $NEXT_ARCHIVE_YEAR ]]; then
+            # save if it is the day we want
+            do_analyze_save yearly $ARCHIVE
+        elif [[ $DAYSAGO -lt $NEXT_ARCHIVE_YEAR ]] && is_same_year $DAYSAGO $ARCHIVE ; then
+            do_analyze_keep yearly $ARCHIVE
+        elif [[ $DAYSAGO -lt $NEXT_ARCHIVE_YEAR ]] && [[ $DAYSAGO -ge $(( $NEXT_ARCHIVE_YEAR - $PURGE_YEAR_THRESHOLD )) ]] ; then
+            do_analyze_keep yearly $ARCHIVE
+        elif [[ $DAYSAGO -gt $NEXT_ARCHIVE_YEAR ]] && [ ! -z "$CANDIDATE_YEARLY" ]; then
+            do_analyze_save monthly $CANDIDATE_YEARLY
+        elif [[ $DAYSAGO -gt $NEXT_ARCHIVE_YEAR ]] && [[ $DAYSAGO -le $(( $NEXT_ARCHIVE_YEAR + $PURGE_YEAR_THRESHOLD )) ]]; then
+            do_analyze_save yearly $ARCHIVE
+        elif [[ $DAYSAGO -gt $NEXT_ARCHIVE_YEAR ]]; then
+            # Else no archive available during the backup window
+            do_adjust_dates_year $DAYSAGO
+        fi
+    fi
+
+    if [[ $DAYSAGO -le $KEEP_MONTHS ]]; then
+        if [[ $DAYSAGO -eq $NEXT_ARCHIVE_MONTH ]]; then
+            # save if it is the day we want
+            do_analyze_save monthly $ARCHIVE
+        elif [[ $DAYSAGO -lt $NEXT_ARCHIVE_MONTH ]] && is_same_month $DAYSAGO $ARCHIVE ; then
+            do_analyze_keep monthly $ARCHIVE
+        elif [[ $DAYSAGO -lt $NEXT_ARCHIVE_MONTH ]] && [[ $DAYSAGO -ge $(( $NEXT_ARCHIVE_MONTH - $PURGE_MONTH_THRESHOLD )) ]] ; then
+            do_analyze_keep monthly $ARCHIVE
+        elif [[ $DAYSAGO -gt $NEXT_ARCHIVE_MONTH ]] && [ ! -z "$CANDIDATE_MONTHLY" ]; then
+            do_analyze_save monthly $CANDIDATE_MONTHLY
+        elif [[ $DAYSAGO -gt $NEXT_ARCHIVE_MONTH ]] && [[ $DAYSAGO -le $(( $NEXT_ARCHIVE_MONTH + $PURGE_MONTH_THRESHOLD )) ]]; then
+            do_analyze_save monthly $ARCHIVE
+        elif [[ $DAYSAGO -gt $NEXT_ARCHIVE_MONTH ]]; then
+            # Else no archive available during the backup window
+            do_adjust_dates_month $DAYSAGO
+        fi
+        do_adjust_dates_year $DAYSAGO
+    fi
+
+    if [[ $DAYSAGO -le $KEEP_WEEKS ]]; then
+        if [[ $DAYSAGO -eq $NEXT_ARCHIVE_WEEK ]]; then
+            # save if it is the day we want
+            do_analyze_save weekly $ARCHIVE
+        elif [[ $DAYSAGO -lt $NEXT_ARCHIVE_WEEK ]]; then
+            if is_same_week $DAYSAGO $ARCHIVE ; then
+                do_analyze_keep weekly $ARCHIVE
+            elif [[ $DAYSAGO -ge $(( $NEXT_ARCHIVE_WEEK - $PURGE_WEEK_THRESHOLD )) ]] ; then
+                do_analyze_keep weekly $ARCHIVE
+            fi
+        elif [[ $DAYSAGO -gt $NEXT_ARCHIVE_WEEK ]]; then
+            if [ ! -z "$CANDIDATE_WEEKLY" ]; then
+                do_analyze_save weekly $CANDIDATE_WEEKLY
+            elif [[ $DAYSAGO -le $(( $NEXT_ARCHIVE_WEEK + $PURGE_WEEK_THRESHOLD )) ]]; then
+                do_analyze_save weekly $ARCHIVE
+            else
+                # Else no archive available during the backup window
+                do_adjust_dates_week $DAYSAGO
+            fi
+        fi
+        do_adjust_dates_month $DAYSAGO
+        do_adjust_dates_year $DAYSAGO
+    fi
+
+    do_analyze_delete $ARCHIVE
+
+    if [[ $DAYSAGO -gt $KEEP_YEARS ]]; then
+        do_analyze_keep weekly  ""
+        do_analyze_keep monthly ""
+        do_analyze_save yearly  ""
+        do_analyze_delete $ARCHIVE
+    fi
+
+    PREV_DAYSAGO=$DAYSAGO
+done
+
+if [[ $DAYSAGO -lt $KEEP_WEEKS ]]  && [ ! -z "$CANDIDATE_WEEKLY" ]; then
+    do_analyze_save weekly  $CANDIDATE_WEEKLY
+fi
+if [[ $DAYSAGO -lt $KEEP_MONTHS ]] && [ ! -z "$CANDIDATE_MONTHLY" ]; then
+    do_analyze_save monthly $CANDIDATE_MONTHLY
+fi
+if [[ $DAYSAGO -lt $KEEP_YEARS ]]  && [ ! -z "$CANDIDATE_YEARLY" ]; then
+    do_analyze_save yearly  $CANDIDATE_YEARLY
+fi
+
+# Clean up
+do_analyze_keep daily ""
+do_analyze_keep weekly ""
+do_analyze_keep monthly ""
+do_analyze_keep yearly ""
+
