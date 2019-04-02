@@ -23,7 +23,7 @@ cannot be redifined to be another day.
 first day of the week is preferred, that cannot be defined.
 
     `borg-purge-archives` allows the preferred day of the week, month, year to be
-selected. If there is not an achive for the preferred day, a threshold is
+selected. If there is not an archive for the preferred day, a threshold is
 evaluated to determine how many days before or after in which an alternative can
 be selected. The last available before or first available after the preferred
 day within this threshold period is chosen.
@@ -147,12 +147,12 @@ archive is kept.
 The `--verbose N` argument's value is the desired level of verbosity to output
 what the program is doing. Generally, this is what the levels output:
 
-`1` The saved archives
-`2` The purged archives
-`3` The kept archives (those that are weekly, monthly, yearly candidates)
-`4` Things that happened that were not severe enough to become a warning
-`5-7` information about processes and cycles
-`8-9` information about why something didn't happen (e.g. did not purge an archive because it is a weekly candidate)
+* `1` The saved archives
+* `2` The purged archives
+* `3` The kept archives (those that are weekly, monthly, yearly candidates)
+* `4` Things that happened that were not severe enough to become a warning
+* `5-7` information about processes and cycles
+* `8-9` information about why something didn't happen (e.g. did not purge an archive because it is a weekly candidate)
 
 #### Simulation
 
@@ -184,14 +184,21 @@ for i in {0..1000}; do
 done
 ```
 
+## Note about time period archiving
+
+The `borg-purge-archives` does not retain a certain number of daily, weekly,
+monthly, or yearly archives. Instead it retains these archives which fall
+within a certain keep range (time period) of days defined by `KEEP_*`
+variables. If a particular archive falls outside of a keep range (time
+period) of days, it is no longer considered for that keep range and will be
+purged. Within each daily, weekly, monthly keep range, the program looks for
+the archive on or closest to the preferred day of that keep range.
+
 ## Note about the purging process and candidate archives
 
 This program goes backwards in history, beginning the evaluation of archives
-with the newest. Currently, the program only evaluates archives within a
-period of time, and not based on a certain number of archives. Archives are
-purged that fall outside of any managed time period, and which are not the
-preferred archive. For daily time period, all archives are preferred. For
-weekly, monthly, and yearly archives, a preferred day is defined for the day
+with the newest. For daily keep range, all archives are preferred. For weekly,
+monthly, and yearly archives, a preferred day is defined for the day
 that is desired to be kept within that time period. Other archives that are
 not the preferred may be kept as candidates until determined they do not
 satisfy the preferred day criteria.
@@ -222,13 +229,6 @@ previous month as candidates. Let's say the last day is `31`. It will keep
 archives from days `31-22`. The first candidate archive kept after the day `1`
 is the one saved. The remaining are purged.
 
-## Note about time period archiving
-
-The `borg-purge-archives` does not retain a certain number of daily, weekly,
-monthly, or yearly archives. Instead it retains these archives which fall
-within a certain keep range of days defined by KEEP_* variables. If a particular
-archive falls outside of a keep range of days, it is no longer considered for
-that keep range.
 
 ## License
 
