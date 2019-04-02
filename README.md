@@ -147,8 +147,8 @@ archive is kept.
 The `--verbose N` argument's value is the desired level of verbosity to output
 what the program is doing. Generally, this is what the levels output:
 
-* `1` The saved archives
-* `2` The purged archives
+* `1` The purged archives
+* `2` The saved archives
 * `3` The kept archives (those that are weekly, monthly, yearly candidates)
 * `4` Things that happened that were not severe enough to become a warning
 * `5-7` information about processes and cycles
