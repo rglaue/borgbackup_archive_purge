@@ -142,6 +142,18 @@ archive is kept.
   borg-purge-archive --test --repository /var/lib/borg --prefix "daily-" --verbose
 ```
 
+#### Verbosity
+
+The `--verbose N` argument's value is the desired level of verbosity to output
+what the program is doing. Generally, this is what the levels output:
+
+`1` The saved archives
+`2` The purged archives
+`3` The kept archives (those that are weekly, monthly, yearly candidates)
+`4` Things that happened that were not severe enough to become a warning
+`5-7` information about processes and cycles
+`8-9` information about why something didn't happen (e.g. did not purge an archive because it is a weekly candidate)
+
 #### Simulation
 
   `borg-purge-archive --simulate <dir>` will run a simulation test for the
@@ -171,6 +183,44 @@ for i in {0..1000}; do
     fi
 done
 ```
+
+## Note about the purging process and candidate archives
+
+This program goes backwards in history, beginning the evaluation of archives
+with the newest. Currently, the program only evaluates archives within a
+period of time, and not based on a certain number of archives. Archives are
+purged that fall outside of any managed time period, and which are not the
+preferred archive. For daily time period, all archives are preferred. For
+weekly, monthly, and yearly archives, a preferred day is defined for the day
+that is desired to be kept within that time period. Other archives that are
+not the preferred may be kept as candidates until determined they do not
+satisfy the preferred day criteria.
+
+Since this program uses a threshold value to help determine what archives to
+keep, it uses a candidacy process. An archive within a threshold for weekly,
+monthly, or yearly can become a candidate for the weekly, monthly, or yearly
+archive to save permanently.
+
+The program will look for an archive that is datestamped for the preferred
+weekly, monthly, or yearly day desired to be kept. However, it will observe
+archives before and after the preferred day, which lay within the defined
+threshold, as potential candidates to be this archive. Should there not be an
+archive for the preferred day, the candidate is saved as the alternate
+preferred archive.
+
+This program prefers the candidate archive with a datestamp closest to the
+preferred day, which follows the preferred day. Should there be no candidate
+following the preferred day, a candidate archive before the preferred day is
+chosen. Again, the archive datestamped closest to the preferred day is chosen.
+
+Example: If the preferred day of month is `1`, and the month threshold is `10`,
+this application will begin keeping candidates starting on day `11` of the
+month. As it gets closer to day `1`, it will keep that next day's archive as
+the candidate, and purge the previous candidate. If there is no archive on days
+`1-11`, then this program begins keeping archives on the last day of the
+previous month as candidates. Let's say the last day is `31`. It will keep
+archives from days `31-22`. The first candidate archive kept after the day `1`
+is the one saved. The remaining are purged.
 
 ## Note about time period archiving
 
