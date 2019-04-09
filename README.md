@@ -221,8 +221,6 @@ problematic.
 See the Borg Backup FAQ question "Can I copy or synchronize my repo to another location?"
 https://borgbackup.readthedocs.io/en/stable/faq.html#can-i-copy-or-synchronize-my-repo-to-another-location
 
-However,
-
 The recommended way to keep a second copy of the repository is to backup the
 client machine twice, once to each repository. However, this is not ideal
 when archiving a borg repository to an off-site storage, because it
@@ -234,7 +232,7 @@ care to not cause conflict in the borg repository config and cache.
 
 The `.cache` and `.config` directories are kept in `BORG_BASE_DIR/`. If the
 `BORG_BASE_DIR` variable is changed for every copy of the repository, then it
-is possible to create multiple copies with the Repository ID using rsync.
+is possible to create multiple copies with the same Repository ID using rsync.
 Here is an example script to access a borg repository copy:
 
 ```bash
@@ -295,7 +293,7 @@ borg-purge-archive \
 export BORG_BASE_DIR=/var/backup/borg-archives/2019-02
 borg-purge-archive \
     --start-date "2019-02-28" \
-    --repository /var/backup/borg-archives/2019-02/ \
+    --repository /var/backup/borg-archives/2019-02/borgrepo \
     --prefix "daily-"
 ```
 
@@ -347,7 +345,7 @@ is the one saved. The remaining are purged.
 
 ## License
 
-Copyright (C) 2018 [Center for the Application of Information Technologies](http://www.cait.org),
+Copyright (C) 2019 [Center for the Application of Information Technologies](http://www.cait.org),
 [Western Illinois University](http://www.wiu.edu). All rights reserved.
 
 Apache License 2.0, see [LICENSE](https://github.com/prometheus/haproxy_exporter/blob/master/LICENSE).
