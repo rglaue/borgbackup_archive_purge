@@ -5,7 +5,7 @@ Borg has its own purge machanisim, `borg prune ...` with the following caveats
 that this `borg-purge-archives` program attempts to satisfy:
 
 1. `borg prune` prunes according to the timestamp of when the archive was
-created, or as set with `borg create --timestamp=<s>`.
+created, or as set with `borg create --timestamp=<D>`.
 
     If there is a process that moves multiple days of content from a remote
 system into different archives based on the age of the content, the archives
@@ -147,10 +147,10 @@ archive is kept.
                           <D> is any date recognized by the GNU date program.
     --repositiory <dir> (required) The Borg repository to purge from
     --prefix <string>   (required) The name prefix of the archives to consider
-    --borg-base-dir=v   Set the BORG_BASE_DIR environment variable. This
+    --borg-base-dir <v> Set the BORG_BASE_DIR environment variable. This
                           directory is where borg looks for the .cache/ and
                           .config/ directories for the repository.
-    --borg-command=v    Set the path to borg and any other parameters that are
+    --borg-command <v>  Set the path to borg and any other parameters that are
                           desired to be passed in
     # Simulation testing does not require any other arguments, unless the
     # simulate directory will be populated with --sim-populate. However, the
