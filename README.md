@@ -5,16 +5,17 @@ Borg has its own purge machanisim, `borg prune ...` with the following caveats
 that this `borg-purge-archives` program attempts to satisfy:
 
 1. `borg prune` prunes according to the timestamp of when the archive was
-created.
+created, or as set with `borg create --timestamp=<s>`.
 
     If there is a process that moves multiple days of content from a remote
 system into different archives based on the age of the content, the archives
-are recognized by the day they were created and not the day representing the
-age of the content. This is understandable, and could be reconciled if the
-borg archive's timestamp could be changed.
+are recognized by the day they were created, or with the provided value of the
+`--timestamp` argument. The timestamp cannot be changed after the archive's
+initial creation.
 
     `borg-purge-archives` uses a timestamp that is part of the archive name
-to determine the date of the content.
+to determine the date of the content. The timestamp in the archive name of
+course can be changed.
 
 1. `borg prune` only keeps the last archive of the specific time period, and
 cannot be redifined to be another day.
@@ -28,10 +29,27 @@ evaluated to determine how many days before or after in which an alternative can
 be selected. The last available before or first available after the preferred
 day within this threshold period is chosen.
 
+1. `borg prune` only evaluates the archive pruning starting backwards from the
+day of execution.
+
+    `borg-purge-archives` allows for a starting date to be defined with the
+`--start-date` argument. Evaluation begins from the Starting date, and going
+backwards. Archives after the starting date are purged.
+
+    This is desireable if a copy of the repository is made somewhere, and the
+copy is intended to only hold a set of archives within a specific time span. An
+example would be if a borg repository is copied with rsync to an off-site
+location with the intention to only hold archives for the previous month. On
+the second day of the new month, say March 2, 2019, the repository is rsynced.
+Then `borg-purge-archives --start-date "2019-02-28" ...` is executed on the
+repository copy.
+
+   See the note below about the purging process and candidate archives.
+
 
 Of course `borg-purge-archives` is not as advanced as `borg prune`. The purge
-process currently only evaluates down to the day, and currently only recognizes
-timestamps of YYYY-MM-DD.
+process currently only evaluates to the day (not hour, minute, second), and
+currently only recognizes timestamps of YYYY-MM-DD.
 
 ##### Motivation
 
@@ -48,16 +66,25 @@ daily archives in the borg that did not use the borg archive timestamps, and
 which allowed the selection of alternate days for keeping weekly, monthly,
 yearly archives.
 
-##### Version 1.0
-Version 1.0 is the inital release
+In addition to the central location for long term backup, the borg repository
+is copied and archived onto an off-site disk for longer term cold storage, for
+disaster recovery purposes. There was a need to set the start date for pruning
+archives from the archived copy of the borg repository so that it maintains
+archives within a certain time range.
+
+##### Version 1.1
+Version 1.1 adds support for defining the Starting Date to begin evaluation of purging archives.
 
 ## Why you would not want to use this program
 
-There are two reasons why, in some distant future, one would not want to use
+There are three reasons why, in some distant future, one would not want to use
 this program.
 
-1. Borg Backup maintainers added support to change the repository archive timestamp.
-1. Borg Backup maintainers added support to change the preferred day of week, month, year that is desired to be kept.
+1. Borg Backup maintainers added support to change the timestamp of a repository
+     archive after its creation.
+1. Borg Backup maintainers added support to change the preferred day of week,
+     month, year that is desired to be kept.
+1. Borg Backup maintainers added support to define the evaluation starting date.
 
 ## Using for your purposes
 
@@ -104,20 +131,20 @@ archive is kept.
 
 ### Parameters and usage
 
-    `borg-purge-archives` version 1.0
+    borg-purge-archives version 1.1
 
     This program will purge archives from a Borg Backup repository based on
-    archival dates set in the archive name, e.g. archive-2019-08-01, rather than
-    the actual timestamp recorded by borg for when the archive was created.
-    
-    The `borg --purge` performs purge operations based on the recorded timestamp
-    which is not desired if multiple-day archives are created on a single day,
-    or created on an a day that differs from the content in the archive.
-    
+    archival dates set in the archive name, e.g. daily-2019-08-01, rather than
+    the timestamp recorded by borg when the archive was created or as set with
+    `borg create --timestamp=<D>`.
+
     --help              This help message
     --verbose [0-9]     Set the verbosity level
     --test		Show what would happen without doing it
                           this sets VERBOSE=1 if not set with --verbose
+    --start-date <D>    Start on this date for evaluation, as though it was
+                          today. Days after this date are purged. The string
+                          <D> is any date recognized by the GNU date program.
     --repositiory <dir> (required) The Borg repository to purge from
     --prefix <string>   (required) The name prefix of the archives to consider
     --borg-base-dir=v   Set the BORG_BASE_DIR environment variable. This
@@ -182,6 +209,94 @@ for i in {0..1000}; do
         break
     fi
 done
+```
+
+## Note about creating borg repository archives
+
+The borg maintainers do not endorse the use of rsync to create a copy of a borg
+repository. The reason is because the Repository ID will be duplicated. Having
+multiple copies of a repository with the same ID on the same machine will be
+problematic.
+
+See the Borg Backup FAQ question "Can I copy or synchronize my repo to another location?"
+https://borgbackup.readthedocs.io/en/stable/faq.html#can-i-copy-or-synchronize-my-repo-to-another-location
+
+However,
+
+The recommended way to keep a second copy of the repository is to backup the
+client machine twice, once to each repository. However, this is not ideal
+when archiving a borg repository to an off-site storage, because it
+requires the off-site storage to be online all the time, and be relatively
+fast.
+
+Archiving borg respositories can be achieved with rsync when taking special
+care to not cause conflict in the borg repository config and cache.
+
+The `.cache` and `.config` directories are kept in `BORG_BASE_DIR/`. If the
+`BORG_BASE_DIR` variable is changed for every copy of the repository, then it
+is possible to create multiple copies with the Repository ID using rsync.
+Here is an example script to access a borg repository copy:
+
+```bash
+#!/bin/bash
+
+THIS_PATH=$(readlink -f $0)
+THIS_DIR=$(dirname $THIS_PATH)
+
+export BORG_BASE_DIR=${THIS_DIR}
+
+borg $*
+```
+
+Name this script `localborg`, and place it in the system at
+`BORG_BASE_DIR/localborg`. When working with the borg repository, be sure to
+always use the `localborg` for the copy of the repository you reference. For
+example, this might be the file system tree:
+```bash
+  + /var/backup/borg-archives/
+  |--+ 2019-02/
+  |  |--- .cache
+  |  |--- .config
+  |  |--- borgrepo
+  |  `--- localborg
+  `--+ 2019-03/
+     |--- .cache
+     |--- .config
+     |--- borgrepo
+     `--- localborg
+```
+
+When you access the repository copy with `localborg` the first time, you will
+receive a warning message you can answer yes to:
+```bash
+linux ~# cd /var/backup/borg-archives/2019-02/
+linux 2019-02# ./localborg list borgrepo
+Warning: The repository at location /var/backup/borg-archives/2019-02/borgrepo was previously located at /var/backup/borg/MyRepo
+Do you want to continue? [yN]
+```
+
+After the archived copy of the borg repository is created with rsync, it can
+then be purged with a command like one of the following:
+```bash
+borg-purge-archive \
+    --start-date "2019-02-28" \
+    --repository /var/backup/borg-archives/2019-02/borgrepo \
+    --borg-command /var/backup/borg-archives/2019-02/localborg \
+    --prefix "daily-"
+```
+```bash
+borg-purge-archive \
+    --start-date "2019-02-28" \
+    --repository /var/backup/borg-archives/2019-02/borgrepo \
+    --borg-base-dir /var/backup/borg-archives/2019-02 \
+    --prefix "daily-"
+```
+```bash
+export BORG_BASE_DIR=/var/backup/borg-archives/2019-02
+borg-purge-archive \
+    --start-date "2019-02-28" \
+    --repository /var/backup/borg-archives/2019-02/ \
+    --prefix "daily-"
 ```
 
 ## Note about time period archiving
