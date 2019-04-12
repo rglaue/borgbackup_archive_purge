@@ -319,6 +319,38 @@ period) of days, it is no longer considered for that keep range and will be
 purged. Within each daily, weekly, monthly keep range, the program looks for
 the archive on or closest to the preferred day of that keep range.
 
+```bash
+# Peroid of days, starting from today, to analyze for archiving.
+# Each starts from 0 to the day given
+KEEP_DAYS=90
+KEEP_WEEKS=185
+KEEP_MONTHS=366
+KEEP_YEARS=3660
+```
+
+Assuming there is a borg archive for every day, for the last 365 days,
+including today. The value `KEEP_DAYS=90` will keep every archive for the most
+recent 91 days, or 91 days starting from the date provided in the
+`--start-date` argument. Today is day 0, and yesterday is 1 day ago.
+
+Only one archive is retained for the time periods of WEEKS, MONTHS, and YEARS.
+So the preferred day to retain for each time period must be defined. The
+preferred day is identified as the day number for each period.
+
+```bash
+# Preferred day of saved archive to keep
+KEEP_WEEK_DAY=1  # Monday=1, Sunday=7
+KEEP_MONTH_DAY=1 # First day of the month
+KEEP_YEAR_DAY=1  # First day of the year
+```
+
+If there is not an archive available for every day, then an archive for the
+preferred day may not be available. The threshold values are used for each time
+period to allow archives preceeding and following the preferred day to be
+alternatively chosen.
+
+See the above section "Configuring daily, weekly, monthly, yearly keep and threshold values"
+
 ## Note about the purging process and candidate archives
 
 This program goes backwards in history, beginning the evaluation of archives
