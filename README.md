@@ -333,6 +333,10 @@ including today. The value `KEEP_DAYS=90` will keep every archive for the most
 recent 91 days, or 91 days starting from the date provided in the
 `--start-date` argument. Today is day 0, and yesterday is 1 day ago.
 
+If there were 5 daily archives missing during the time from yesterday (1 days
+ago) until 90 days ago, there would be 86 archives. And 86 archives would be
+retained because we are retaining all archives between day 0 and day 90.
+
 Only one archive is retained for the time periods of WEEKS, MONTHS, and YEARS.
 So the preferred day to retain for each time period must be defined. The
 preferred day is identified as the day number for each period.
