@@ -11,7 +11,7 @@ created, or as set with `borg create --timestamp=<D>`.
 system into different archives based on the age of the content, the archives
 are recognized by the day they were created, or with the provided value of the
 `--timestamp` argument. The timestamp cannot be changed after the archive's
-initial creation.
+initial creation. [Issue #2962](https://github.com/borgbackup/borg/issues/2961)
 
     `borg-purge-archives` uses a timestamp that is part of the archive name
 to determine the date of the content. The timestamp in the archive name of
@@ -50,6 +50,18 @@ repository copy.
 Of course `borg-purge-archives` is not as advanced as `borg prune`. The purge
 process currently only evaluates to the day (not hour, minute, second), and
 currently only recognizes timestamps of YYYY-MM-DD.
+
+##### Borg Backup wishlist
+
+Life would be easier, and this `borg-purge-archives` is designed to support
+them when they eventually happen, when wishes are fulfilled. In addition to
+the caveats above, here is the author's wishlist for Borg Backup.
+
+1. Support for the import-tar feature. [Issue #2233](https://github.com/borgbackup/borg/issues/2233)
+    This feature will allow a borg repository to be copied. But more precisely
+    to only copy the archives wanted. So with this feature, one can init a
+    new borg repository, and import Borg Backup archives from one repository
+    into the new repository within a certain time range.
 
 ##### Motivation
 
@@ -140,18 +152,18 @@ archive is kept.
 
     --help              This help message
     --verbose [0-9]     Set the verbosity level
-    --test		Show what would happen without doing it
+    --test              Show what would happen without doing it
                           this sets VERBOSE=1 if not set with --verbose
     --start-date <D>    Start on this date for evaluation, as though it was
                           today. Days after this date are purged. The string
                           <D> is any date recognized by the GNU date program.
     --repositiory <dir> (required) The Borg repository to purge from
     --prefix <string>   (required) The name prefix of the archives to consider
-    --borg-base-dir <v> Set the BORG_BASE_DIR environment variable. This
+    --borg-base-dir <s> Set the BORG_BASE_DIR environment variable. This
                           directory is where borg looks for the .cache/ and
                           .config/ directories for the repository.
-    --borg-command <v>  Set the path to borg and any other parameters that are
-                          desired to be passed in
+    --borg-command <s>  Set the path to the borg command and any other
+                          parameters that are desired to be passed in
     # Simulation testing does not require any other arguments, unless the
     # simulate directory will be populated with --sim-populate. However, the
     # --verbose and --test flags are evaluated for simulation runs.
@@ -211,7 +223,7 @@ for i in {0..1000}; do
 done
 ```
 
-## Note about creating borg repository archives
+## Note about creating copies of borg repositories
 
 The borg maintainers do not endorse the use of rsync to create a copy of a borg
 repository. The reason is because the Repository ID will be duplicated. Having

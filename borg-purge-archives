@@ -261,7 +261,7 @@ get_daysago () {
         if [[ ! "$thisdate" =~ [0-9]{4}\-[0-9]{2}\-[0-9]{2} ]]; then
             return 1
         fi
-        echo $(( ( $(date -d "$START_DATE" +%s) - $(date -d "$thisdate" +%s) ) /(24 * 60 * 60 ) ))
+        echo $(( ( $(date -u -d "$START_DATE" +%s) - $(date -u -d "$thisdate" +%s) ) /(24 * 60 * 60 ) ))
     fi
     return 1
 }
@@ -341,7 +341,7 @@ do_analyze_delete () {
     if    [ ! "$ARCHIVE" = "$CANDIDATE_WEEKLY" ] \
        && [ ! "$ARCHIVE" = "$CANDIDATE_MONTHLY" ] \
        && [ ! "$ARCHIVE" = "$CANDIDATE_YEARLY" ] \
-       && [ -z "$LAST_SAVED_ARCHIVE" ] || [ "$ARCHIVE" '<' "$LAST_SAVED_ARCHIVE" ]; then
+       && ( [ -z "$LAST_SAVED_ARCHIVE" ] || [ "$ARCHIVE" '<' "$LAST_SAVED_ARCHIVE" ] ); then
         echo_v "[Purge] "$ARCHIVE
         do_borg_delete_archive $ARCHIVE
     else
@@ -375,8 +375,9 @@ do_analyze_keep () {
         OLD_CANDIDATE=$CANDIDATE_YEARLY
         CANDIDATE_YEARLY=$ARCHIVE
     fi
+    [[ "${#ARCHIVE}" -lt 1 ]] && echo_v 4 "[un-Keep] $OLD_CANDIDATE ($TYPE)"
     [ ! -z "$OLD_CANDIDATE" ] && do_analyze_delete $OLD_CANDIDATE
-    echo_v 3 "[Keep] $ARCHIVE ($TYPE)"
+    [ ! -z "$ARCHIVE" ] && echo_v 3 "[Keep] $ARCHIVE ($TYPE)"
 }
 
 do_analyze_save () {
@@ -427,7 +428,7 @@ do_adjust_dates_day () {
 do_adjust_dates_week () {
     local DAYSAGO=$1
     [[ "$DAYSAGO" -lt 0 ]] && return
-    local week_day_now=$(date -d"-$DAYSAGO days" +%u)
+    local week_day_now=$(date -u -d"$START_DATE -$DAYSAGO days" +%u)
     if [[ $week_day_now -le $KEEP_WEEK_DAY ]]; then
         # need to evaluate previous week
         NEXT_ARCHIVE_WEEK=$(( $DAYSAGO + $week_day_now + 7 - $KEEP_WEEK_DAY ))
@@ -440,8 +441,8 @@ do_adjust_dates_week () {
 do_adjust_dates_month () {
     local DAYSAGO=$1
     [[ "$DAYSAGO" -lt 0 ]] && return
-    local month_num=$(date -d"-$DAYSAGO days" +%m)
-    local month_day_now=$(date -d"-$DAYSAGO days" +%_d)
+    local month_num=$(date -u -d"$START_DATE -$DAYSAGO days" +%m)
+    local month_day_now=$(date -u -d"$START_DATE -$DAYSAGO days" +%_d)
     if [[ $month_day_now -le $KEEP_MONTH_DAY ]]; then
         # need to evaluate previous month
         local month_day_last=$(date -d"${month_num}/1 -1 day" +%d)
@@ -456,8 +457,8 @@ do_adjust_dates_month () {
 do_adjust_dates_year () {
     local DAYSAGO=$1
     [[ "$DAYSAGO" -lt 0 ]] && return
-    local year_num=$(date -d"-$DAYSAGO days" +%Y)
-    local year_day_now=$(date -d"-$DAYSAGO days" +%_j)
+    local year_num=$(date -u -d"$START_DATE -$DAYSAGO days" +%Y)
+    local year_day_now=$(date -u -d"$START_DATE -$DAYSAGO days" +%_j)
     if [[ $year_day_now -le $KEEP_YEAR_DAY ]]; then
         # need to evaluate previous year
         local year_day_last=$(date -d"january 1 ${year_num} -1 day" +%j)
@@ -482,7 +483,7 @@ is_same_year () {
     local DAYSAGO=$1
     local ARCHIVE=$2
     local A_DAYSAGO=$(get_daysago $ARCHIVE)
-    if [[ $(date -d"-$DAYSAGO days" +%_Y) = $(date -d"-$A_DAYSAGO days" +%_Y) ]]; then
+    if [[ $(date -u -d"$START_DATE -$DAYSAGO days" +%_Y) = $(date -u -d"$START_DATE -$A_DAYSAGO days" +%_Y) ]]; then
         return 0
     else
         return 1
@@ -496,7 +497,7 @@ is_same_week () {
     if ! is_same_year $DAYSAGO $ARCHIVE ; then
         return 1
     fi
-    if [[ $(date -d"-$DAYSAGO days" +%U) = $(date -d"-$A_DAYSAGO days" +%U) ]]; then
+    if [[ $(date -u -d"$START_DATE -$DAYSAGO days" +%U) = $(date -u -d"$START_DATE -$A_DAYSAGO days" +%U) ]]; then
         return 0
     else
         return 1
@@ -510,7 +511,7 @@ is_same_month () {
     if ! is_same_year $DAYSAGO $ARCHIVE ; then
         return 1
     fi
-    if [[ $(date -d"-$DAYSAGO days" +%_m) = $(date -d"-$A_DAYSAGO days" +%_m) ]]; then
+    if [[ $(date -u -d"$START_DATE -$DAYSAGO days" +%_m) = $(date -u -d"$START_DATE -$A_DAYSAGO days" +%_m) ]]; then
         return 0
     else
         return 1
@@ -577,10 +578,9 @@ for ARCHIVE in $(do_borg_archive_list) ; do
         done
     fi
 
-    echo_v 7 " (( [${DAYSAGO}]NEXT: "$NEXT_ARCHIVE_DAY", "$NEXT_ARCHIVE_WEEK", "$NEXT_ARCHIVE_MONTH", "$NEXT_ARCHIVE_year" == $ARCHIVE ))"
+    echo_v 7 " (( [${DAYSAGO}]NEXT: \"D=[$NEXT_ARCHIVE_DAY]("$(date -u -d"$START_DATE -$NEXT_ARCHIVE_DAY days" +%a:%m/%d/%y)")\", \"W=[$NEXT_ARCHIVE_WEEK]("$(date -u -d"$START_DATE -$NEXT_ARCHIVE_WEEK days" +%a:%m/%d/%y)")\", \"M=[$NEXT_ARCHIVE_MONTH]("$(date -u -d"$START_DATE -$NEXT_ARCHIVE_MONTH days" +%a:%m/%d/%y)")\", \"Y=[$NEXT_ARCHIVE_YEAR]("$(date -u -d"$START_DATE -$NEXT_ARCHIVE_YEAR days" +%a:%m/%d/%y)")\" == $ARCHIVE ))"
 
     if [[ $DAYSAGO -lt 0 ]]; then
-echo "DAYSAGO=$DAYSAGO"
         # will be true in use of --start-date
         do_analyze_delete $ARCHIVE
         PREV_DAYSAGO=$DAYSAGO
