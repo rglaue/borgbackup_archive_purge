@@ -34,7 +34,7 @@ day of execution.
 
     `borg-purge-archives` allows for a starting date to be defined with the
 `--start-date` argument. Evaluation begins from the Starting date, and going
-backwards. Archives after the starting date are purged.
+backwards. Archives after (younger than) the starting date are purged.
 
     This is desireable if a copy of the repository is made somewhere, and the
 copy is intended to only hold a set of archives within a specific time span. An
@@ -43,6 +43,8 @@ location with the intention to only hold archives for the previous month. On
 the second day of the new month, say March 2, 2019, the repository is rsynced.
 Then `borg-purge-archives --start-date "2019-02-28" ...` is executed on the
 repository copy.
+
+   See the note below about creating copies of borg repositories.
 
    See the note below about the purging process and candidate archives.
 
@@ -58,10 +60,15 @@ them when they eventually happen, when wishes are fulfilled. In addition to
 the caveats above, here is the author's wishlist for Borg Backup.
 
 1. Support for the import-tar feature. [Issue #2233](https://github.com/borgbackup/borg/issues/2233)
+
     This feature will allow a borg repository to be copied. But more precisely
     to only copy the archives wanted. So with this feature, one can init a
     new borg repository, and import Borg Backup archives from one repository
     into the new repository within a certain time range.
+
+    The import-tar feature could be used to make copies of a Borg Backup
+    repository, and avoid the need to use rsync to archive copies of them.
+
 
 ##### Motivation
 
