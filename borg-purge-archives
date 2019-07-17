@@ -5,8 +5,8 @@
 #   Uses a parsed date in the archive name, opposed to the date stored in the
 #   borg db for when it was created, which `borg --purge` uses.
 #
-# reg/20190408
-VERSION="1.1"
+# reg/20190717
+VERSION="1.2"
 #####
 # Configuration
 #
@@ -70,12 +70,10 @@ echo_e () {
 helpmsg () {
   echo "  borg-purge-archives version $VERSION"
 cat<<'HELPEOF'
-
   This program will purge archives from a Borg Backup repository based on
   archival dates set in the archive name, e.g. daily-2019-08-01, rather than
   the timestamp recorded by borg when the archive was created or as set with
   `borg create --timestamp=<D>`.
-
     --help              This help message
     --verbose [0-9]     Set the verbosity level
     --test		Show what would happen without doing it
@@ -83,7 +81,7 @@ cat<<'HELPEOF'
     --start-date <D>    Start on this date for evaluation, as though it was
                           today. Days after this date are purged. The string
                           <D> is any date recognized by the GNU date program.
-    --repositiory <dir> (required) The Borg repository to purge from
+    --repository <dir>  (required) The Borg repository to purge from
     --prefix <string>   (required) The name prefix of the archives to consider
     --borg-base-dir=v   Set the BORG_BASE_DIR environment variable. This
                           directory is where borg looks for the .cache/ and
@@ -100,7 +98,6 @@ cat<<'HELPEOF'
                           named after each archive in the borg repository, then
                           exit. The simulate directory must exist. The --prefix
                           arg is not used, but --repository must be provided.
-
 HELPEOF
 
 #HIDDEN
@@ -335,13 +332,26 @@ LAST_ARCHIVE_MONTH=0
 NEXT_ARCHIVE_MONTH=0
 LAST_ARCHIVE_YEAR=0
 NEXT_ARCHIVE_YEAR=0
+SAVED_ARCHIVES=()
+
+is_saved () {
+    local ARCHIVE=$1
+    #for saved_archive in "${SAVED_ARCHIVES[@]}"; do
+    local idx
+    for (( idx=${#SAVED_ARCHIVES[@]}-1 ; idx>=0 ; idx-- )) ; do
+        if [[ "${SAVED_ARCHIVES[idx]}" = "${ARCHIVE}" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
 
 do_analyze_delete () {
     local ARCHIVE=$1
     if    [ ! "$ARCHIVE" = "$CANDIDATE_WEEKLY" ] \
        && [ ! "$ARCHIVE" = "$CANDIDATE_MONTHLY" ] \
        && [ ! "$ARCHIVE" = "$CANDIDATE_YEARLY" ] \
-       && ( [ -z "$LAST_SAVED_ARCHIVE" ] || [ "$ARCHIVE" '<' "$LAST_SAVED_ARCHIVE" ] ); then
+       && ! is_saved "$ARCHIVE" ; then
         echo_v "[Purge] "$ARCHIVE
         do_borg_delete_archive $ARCHIVE
     else
@@ -353,8 +363,8 @@ do_analyze_delete () {
             echo_v 8 "[No Purge] $ARCHIVE is the yearly candidate"
         elif [ "$ARCHIVE" = "$LAST_SAVED_ARCHIVE" ]; then
             echo_v 8 "[No Purge] $ARCHIVE is the last saved archive"
-        elif [ ! "$ARCHIVE" '<' "$LAST_SAVED_ARCHIVE" ]; then
-            echo_v 9 "[No Purge] $ARCHIVE is older than the last saved archive $LAST_SAVED_ARCHIVE."
+        elif is_saved "$ARCHIVE" ; then
+            echo_v 9 "[No Purge] $ARCHIVE is saved."
         else
             echo_v 4 "[No Purge] $ARCHIVE, for unknown reason"
         fi
@@ -417,6 +427,7 @@ do_analyze_save () {
     [ "$TYPE" = "weekly"  ] && LAST_ARCHIVE_WEEK=$LAST_DAYSAGO  && do_adjust_dates_week  $NEXT_ARCHIVE_WEEK
     [ "$TYPE" = "monthly" ] && LAST_ARCHIVE_MONTH=$LAST_DAYSAGO && do_adjust_dates_month $NEXT_ARCHIVE_MONTH
     [ "$TYPE" = "yearly"  ] && LAST_ARCHIVE_YEAR=$LAST_DAYSAGO  && do_adjust_dates_year  $NEXT_ARCHIVE_YEAR
+    SAVED_ARCHIVES+=($LAST_SAVED_ARCHIVE)
     echo_v 2 "[Save] "$LAST_SAVED_ARCHIVE" ("$TYPE")["$LAST_DAYSAGO"]"
 }
 
@@ -604,7 +615,7 @@ for ARCHIVE in $(do_borg_archive_list) ; do
         elif [[ $DAYSAGO -lt $NEXT_ARCHIVE_YEAR ]] && [[ $DAYSAGO -ge $(( $NEXT_ARCHIVE_YEAR - $PURGE_YEAR_THRESHOLD )) ]] ; then
             do_analyze_keep yearly $ARCHIVE
         elif [[ $DAYSAGO -gt $NEXT_ARCHIVE_YEAR ]] && [ ! -z "$CANDIDATE_YEARLY" ]; then
-            do_analyze_save monthly $CANDIDATE_YEARLY
+            do_analyze_save yearly $CANDIDATE_YEARLY
         elif [[ $DAYSAGO -gt $NEXT_ARCHIVE_YEAR ]] && [[ $DAYSAGO -le $(( $NEXT_ARCHIVE_YEAR + $PURGE_YEAR_THRESHOLD )) ]]; then
             do_analyze_save yearly $ARCHIVE
         elif [[ $DAYSAGO -gt $NEXT_ARCHIVE_YEAR ]]; then
@@ -683,4 +694,3 @@ do_analyze_keep daily ""
 do_analyze_keep weekly ""
 do_analyze_keep monthly ""
 do_analyze_keep yearly ""
-

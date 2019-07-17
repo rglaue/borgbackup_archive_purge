@@ -91,8 +91,10 @@ disaster recovery purposes. There was a need to set the start date for pruning
 archives from the archived copy of the borg repository so that it maintains
 archives within a certain time range.
 
-##### Version 1.1
-Version 1.1 adds support for defining the Starting Date to begin evaluation of purging archives.
+##### Version 1.2
+Version 1.2 - better evaluation for determining saved archives
+Version 1.1 - adds support for defining the Starting Date to begin evaluation of purging archives.
+Version 1.0 - initial version
 
 ## Why you would not want to use this program
 
@@ -150,7 +152,7 @@ archive is kept.
 
 ### Parameters and usage
 
-    borg-purge-archives version 1.1
+    borg-purge-archives version 1.2
 
     This program will purge archives from a Borg Backup repository based on
     archival dates set in the archive name, e.g. daily-2019-08-01, rather than
