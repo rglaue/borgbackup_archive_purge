@@ -92,9 +92,9 @@ archives from the archived copy of the borg repository so that it maintains
 archives within a certain time range.
 
 ##### Version 1.2
-Version 1.2 - better evaluation for determining saved archives
-Version 1.1 - adds support for defining the Starting Date to begin evaluation of purging archives.
-Version 1.0 - initial version
+* 1.2 - better evaluation for determining saved archives
+* 1.1 - adds support for defining the Starting Date to begin evaluation of purging archives.
+* 1.0 - initial version
 
 ## Why you would not want to use this program
 
