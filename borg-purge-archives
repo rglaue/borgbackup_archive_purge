@@ -5,8 +5,8 @@
 #   Uses a parsed date in the archive name, opposed to the date stored in the
 #   borg db for when it was created, which `borg --purge` uses.
 #
-# reg/20190717
-VERSION="1.2"
+# reg/20191017
+VERSION="1.3"
 #####
 # Configuration
 #
@@ -348,6 +348,7 @@ is_saved () {
 
 do_analyze_delete () {
     local ARCHIVE=$1
+    echo_v 6 "[Purge] analyze: $ARCHIVE > candidates weekly($CANDIDATE_WEEKLY) monthly($CANDIDATE_MONTHLY) yearly($CANDIDATE_YEARLY)"
     if    [ ! "$ARCHIVE" = "$CANDIDATE_WEEKLY" ] \
        && [ ! "$ARCHIVE" = "$CANDIDATE_MONTHLY" ] \
        && [ ! "$ARCHIVE" = "$CANDIDATE_YEARLY" ] \
@@ -423,10 +424,22 @@ do_analyze_save () {
     #
     # handle save
     #
-    [ "$TYPE" = "daily"   ] && LAST_ARCHIVE_DAY=$LAST_DAYSAGO   && do_adjust_dates_day   $NEXT_ARCHIVE_DAY
-    [ "$TYPE" = "weekly"  ] && LAST_ARCHIVE_WEEK=$LAST_DAYSAGO  && do_adjust_dates_week  $NEXT_ARCHIVE_WEEK
-    [ "$TYPE" = "monthly" ] && LAST_ARCHIVE_MONTH=$LAST_DAYSAGO && do_adjust_dates_month $NEXT_ARCHIVE_MONTH
-    [ "$TYPE" = "yearly"  ] && LAST_ARCHIVE_YEAR=$LAST_DAYSAGO  && do_adjust_dates_year  $NEXT_ARCHIVE_YEAR
+    if [ "$TYPE" = "daily"   ] || [ "$TYPE" = "weekly"  ] || [ "$TYPE" = "monthly" ] || [ "$TYPE" = "yearly"  ]; then
+      LAST_ARCHIVE_DAY=$LAST_DAYSAGO
+      do_adjust_dates_day   $NEXT_ARCHIVE_DAY
+    fi
+    if [ "$TYPE" = "weekly"  ] || [ "$TYPE" = "monthly" ] || [ "$TYPE" = "yearly"  ]; then
+      LAST_ARCHIVE_WEEK=$LAST_DAYSAGO
+      do_adjust_dates_week  $NEXT_ARCHIVE_WEEK
+    fi
+    if [ "$TYPE" = "monthly" ] || [ "$TYPE" = "yearly"  ]; then
+      LAST_ARCHIVE_MONTH=$LAST_DAYSAGO
+      do_adjust_dates_month $NEXT_ARCHIVE_MONTH
+    fi
+    if [ "$TYPE" = "yearly"  ]; then
+      LAST_ARCHIVE_YEAR=$LAST_DAYSAGO
+      do_adjust_dates_year  $NEXT_ARCHIVE_YEAR
+    fi
     SAVED_ARCHIVES+=($LAST_SAVED_ARCHIVE)
     echo_v 2 "[Save] "$LAST_SAVED_ARCHIVE" ("$TYPE")["$LAST_DAYSAGO"]"
 }
@@ -559,7 +572,6 @@ run_cycle_candidates () {
 INITIALIZED=0
 PREV_DAYSAGO=$DAYSAGO
 for ARCHIVE in $(do_borg_archive_list) ; do
-    echo_v 6 "Considering: $ARCHIVE"
     if [[ $FLAG_CONTROL_C = 1 ]]; then
         last
     fi
@@ -574,7 +586,9 @@ for ARCHIVE in $(do_borg_archive_list) ; do
         echo_e "Rejected date: in "$ARCHIVE
         continue
     fi
-    ymd=$(echo $ARCHIVE | cut -d"-" -f 3-);
+    # ymd=$(echo $ARCHIVE | cut -d"-" -f 3-);
+
+    echo_v 6 "[CONSIDER] $ARCHIVE"
 
     if [[ ! $INITIALIZED = 1 ]]; then
         PREV_DAYSAGO=$DAYSAGO
@@ -607,6 +621,7 @@ for ARCHIVE in $(do_borg_archive_list) ; do
     fi
 
     if [[ $DAYSAGO -le $KEEP_YEARS ]]; then
+        echo_v 6 "[CONSIDER] Analyzing for YEARS - next is $NEXT_ARCHIVE_YEAR"
         if [[ $DAYSAGO -eq $NEXT_ARCHIVE_YEAR ]]; then
             # save if it is the day we want
             do_analyze_save yearly $ARCHIVE
@@ -625,6 +640,7 @@ for ARCHIVE in $(do_borg_archive_list) ; do
     fi
 
     if [[ $DAYSAGO -le $KEEP_MONTHS ]]; then
+        echo_v 6 "[CONSIDER] Analyzing for MONTHS - next is $NEXT_ARCHIVE_MONTH"
         if [[ $DAYSAGO -eq $NEXT_ARCHIVE_MONTH ]]; then
             # save if it is the day we want
             do_analyze_save monthly $ARCHIVE
@@ -644,6 +660,7 @@ for ARCHIVE in $(do_borg_archive_list) ; do
     fi
 
     if [[ $DAYSAGO -le $KEEP_WEEKS ]]; then
+        echo_v 6 "[CONSIDER] Analyzing for WEEKS - next is $NEXT_ARCHIVE_WEEK"
         if [[ $DAYSAGO -eq $NEXT_ARCHIVE_WEEK ]]; then
             # save if it is the day we want
             do_analyze_save weekly $ARCHIVE
