@@ -373,7 +373,7 @@ do_analyze_delete () {
 }
 
 do_analyze_keep () {
-    local TYPE=$1    # daily, weekly, monthly, yearly
+    local TYPE=$1    # weekly, monthly, yearly
     local ARCHIVE=$2
     local OLD_CANDIDATE=""
     if [ "$TYPE" = "weekly" ]; then
@@ -385,8 +385,11 @@ do_analyze_keep () {
     elif [ "$TYPE" = "yearly" ]; then
         OLD_CANDIDATE=$CANDIDATE_YEARLY
         CANDIDATE_YEARLY=$ARCHIVE
+    else
+        echo_e "do_analyze_keep: Type=\"$TYPE\" not recognized"
+        return
     fi
-    [[ "${#ARCHIVE}" -lt 1 ]] && echo_v 4 "[un-Keep] $OLD_CANDIDATE ($TYPE)"
+    [ ! -z "$OLD_CANDIDATE" ] && echo_v 4 "[un-Keep] $OLD_CANDIDATE ($TYPE)"
     [ ! -z "$OLD_CANDIDATE" ] && do_analyze_delete $OLD_CANDIDATE
     [ ! -z "$ARCHIVE" ] && echo_v 3 "[Keep] $ARCHIVE ($TYPE)"
 }
@@ -426,19 +429,19 @@ do_analyze_save () {
     #
     if [ "$TYPE" = "daily"   ] || [ "$TYPE" = "weekly"  ] || [ "$TYPE" = "monthly" ] || [ "$TYPE" = "yearly"  ]; then
       LAST_ARCHIVE_DAY=$LAST_DAYSAGO
-      do_adjust_dates_day   $NEXT_ARCHIVE_DAY
+      do_adjust_dates_day   $DAYSAGO
     fi
     if [ "$TYPE" = "weekly"  ] || [ "$TYPE" = "monthly" ] || [ "$TYPE" = "yearly"  ]; then
       LAST_ARCHIVE_WEEK=$LAST_DAYSAGO
-      do_adjust_dates_week  $NEXT_ARCHIVE_WEEK
+      do_adjust_dates_week  $DAYSAGO
     fi
     if [ "$TYPE" = "monthly" ] || [ "$TYPE" = "yearly"  ]; then
       LAST_ARCHIVE_MONTH=$LAST_DAYSAGO
-      do_adjust_dates_month $NEXT_ARCHIVE_MONTH
+      do_adjust_dates_month $DAYSAGO
     fi
     if [ "$TYPE" = "yearly"  ]; then
       LAST_ARCHIVE_YEAR=$LAST_DAYSAGO
-      do_adjust_dates_year  $NEXT_ARCHIVE_YEAR
+      do_adjust_dates_year  $DAYSAGO
     fi
     SAVED_ARCHIVES+=($LAST_SAVED_ARCHIVE)
     echo_v 2 "[Save] "$LAST_SAVED_ARCHIVE" ("$TYPE")["$LAST_DAYSAGO"]"
@@ -707,7 +710,6 @@ if [[ $DAYSAGO -lt $KEEP_YEARS ]]  && [ ! -z "$CANDIDATE_YEARLY" ]; then
 fi
 
 # Clean up
-do_analyze_keep daily ""
 do_analyze_keep weekly ""
 do_analyze_keep monthly ""
 do_analyze_keep yearly ""
