@@ -5,8 +5,8 @@
 #   Uses a parsed date in the archive name, opposed to the date stored in the
 #   borg db for when it was created, which `borg --purge` uses.
 #
-# reg/20191017
-VERSION="1.3"
+# reg/20191206
+VERSION="1.4"
 #####
 # Configuration
 #
