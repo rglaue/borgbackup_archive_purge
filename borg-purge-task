@@ -1,0 +1,373 @@
+#!/bin/bash
+
+#
+# borg-purge-task deletes archives listed in a task file
+#
+# reg/20200318
+VERSION="1.5"
+#####
+# Configuration
+VERBOSE=1
+DRY_RUN=0
+REPORT=0
+SIMULATE=0
+WAIT_PROCESS_NAME="borg"
+WAIT_SLEEP_TIME=60
+BORG_CMD="/usr/bin/borg --lock-wait 18000"
+BORG_REPO=""
+#####
+# Internal
+declare -A REPO_ARCHIVES_LIST
+#####
+
+echo_v () {
+    [[ $VERBOSE -ge 1 ]] || return 0
+    local VL=1
+    if [[ "$1" =~ ^[0-9]{1}$ ]]; then
+        VL=$1
+        shift
+    fi
+    if [[ $VL -le $VERBOSE ]]; then
+        echo $*
+    fi
+}
+
+echo_t () {
+    if [[ $DRY_RUN -eq 1 ]]; then
+        echo "[TEST] "$*
+    fi
+}
+
+echo_e () {
+    local MSG=$*
+    ( >&2 echo "[ERROR] "$MSG )
+}
+
+LAST_P_TYPE=""
+echo_p () {
+    local TYPE=$1
+    shift
+    local MSG=$*
+    if [ ! "$LAST_P_TYPE" = "$TYPE" ]; then
+      LAST_P_TYPE="$TYPE"
+      echo_v 1 "[$(date)] $MSG"
+    fi
+}
+
+does_process_not_run () {
+    PROC_NAME="$1"
+    return $(pgrep -l "${PROC_NAME}" | wc -l)
+}
+
+do_borg_archive_exists () {
+    ARCHIVE=$1
+    if [[ $SIMULATE -eq 1 ]]; then
+        if [ -f $SIM_DIR/$ARCHIVE ]; then
+             return 0
+        fi
+        return 1
+    fi
+
+    if [[ $($BORG_CMD list --short --prefix $ARCHIVE $BORG_REPO | wc -l) -ge 1 ]]; then
+        return 0
+    fi
+    return 1
+}
+
+do_borg_delete_archive () {
+    ARCHIVE=$1
+    if do_borg_archive_exists $ARCHIVE ; then
+        if [[ $DRY_RUN -eq 1 ]]; then
+            if [[ $SIMULATE -eq 1 ]]; then
+                echo_t "rm -v $SIM_DIR/$ARCHIVE"
+                return 0
+            fi
+            echo_t "$BORG_CMD delete $BORG_REPO::$ARCHIVE"
+        else
+            if [[ $SIMULATE -eq 1 ]]; then
+                local FLAG=""
+                [[ $VERBOSE -eq 1 ]] && FLAG="-v"
+                rm $FLAG $SIM_DIR/$ARCHIVE
+                return $?
+            fi
+            $BORG_CMD delete $BORG_REPO::$ARCHIVE
+            if [[ "$?" -ge 1 ]]; then
+                echo_e "Failure: $BORG_CMD delete $BORG_REPO::$ARCHIVE"
+            fi
+        fi
+        return 0
+    else
+        echo_e "Archive $ARCHIVE does not exist in the borg repository."
+        return 1
+    fi
+}
+
+##
+# REPORTING FUNCTIONALITY
+#
+# For Reporting Purposes, the following rules are followed
+# REPO_ARCHIVES_LIST[${ARCHIVE}]=0 == exists and will not be deleted
+# REPO_ARCHIVES_LIST[${ARCHIVE}]=1 == exists and will be deleted
+# REPO_ARCHIVES_LIST[${ARCHIVE}]=2 == does not exist
+#
+
+do_borg_list_archives () {
+    local BORG_REPO="$1"
+    [ -z "${BORG_REPO}" ] && BORG_REPO="."
+    if [[ $SIMULATE -eq 1 ]]; then
+        ls -1 $SIM_DIR/ | sort --reverse
+        return $?
+    fi
+
+    # borg list --prefix ${PREFIX} --short ${BORG_REPO}
+    $BORG_CMD list --short ${BORG_REPO} | sort --reverse
+}
+
+do_borg_list_archives_build () {
+    local BORG_REPO="$1"
+    for ARCHIVE in $(do_borg_list_archives "$BORG_REPO") ; do
+        REPO_ARCHIVES_LIST[${ARCHIVE}]=0
+    done
+}
+
+do_borg_list_archive_exists () {
+    ARCHIVE=$1
+    if [[ ${REPO_ARCHIVES_LIST[${ARCHIVE}]} -le 1 ]]; then  # if equals 0 or 1
+        # Archive found in repository list, return success
+        REPO_ARCHIVES_LIST[${ARCHIVE}]=1
+        return 0
+    fi
+    # Archive not found, return fail
+    REPO_ARCHIVES_LIST[${ARCHIVE}]=2
+    return 1
+}
+
+# END REPORTING METHODS
+##
+
+helpmsg () {
+  echo "  borg-purge-task version $VERSION"
+cat<<'HELPEOF'
+
+  This program will purge archives from a Borg Backup repository based on
+  a task file generated from "borg-purge-archives --create-task". It is 
+  designed to run in the background, and share procedural time on a borg
+  repository with other system processes that also want procedural time.
+
+    --help              This help message
+    --verbose [0-9]     Set the verbosity level
+    --test              Show what would happen without doing it
+                          this sets VERBOSE=1 if not set with --verbose
+    --report            Print out a report of the archives that would be
+                          deleted or saved (does not execute archive deletes)."
+    --borg-base-dir <s> Set the BORG_BASE_DIR environment variable. This
+                          directory is where borg looks for the .cache/ and
+                          .config/ directories for the repository.
+    --borg-command <s>  Set the path to borg and any other parameters that are
+                          desired to be passed in
+                          (Default: "/usr/bin/borg --lock-wait 18000")
+    --repository <dir>  The Borg repository to purge from. If not provided, the
+                          repository is derived from the task file. If
+                          additionally provided in the task file, an error is
+                          given about the conflict.
+    --wait-process-name <s>
+                        Wait for a process to finish that has this name before
+                          performing an archive delete. The purge procedure will
+                          pause between deletes if this process is running. 
+    --wait-sleep-time <i>
+                       (Default: 60) Time to wait (sleep) between archive
+                          deletes to allow for checking if the
+                          wait-process-name is running
+
+  WAIT PROCEDURE
+    Another process, like a backup, is needed to run in a timely fashion with
+    Borg. The --wait-x arguments allow the purge-task to watch, and then pause
+    what it is doing, if watch-process-name is running. The wait-sleep-time
+    causes purge-task to wait between archive deletes to allow time for the
+    wait-process-name to begin running.
+    I deally the backup procedure is using a "borg --lock-wait", so it will
+    wait for purge-task to finish if it is executing a delete. The backup
+    procedure will then execute its task, and purge-task will wait for the
+    backup procedure to complete before purge-task continues.
+
+HELPEOF
+}
+
+while [[ $1 == -* ]]; do
+  ARG=$1
+  if [ "$ARG" == "--borg-base-dir" ]; then
+    shift
+    # Could use  BORG_BASE_DIR="$(readlink -f "$1")"
+    BORG_BASE_DIR="$1"
+    if [ ! -d "$BORG_BASE_DIR/.cache" ] || [ ! -d "$BORG_BASE_DIR/.config" ]; then
+        echo_e "[WARN] one or both of .cache and .config not found in [BORG_BASE_DIR]$BORG_BASE_DIR"
+    fi
+    export BORG_BASE_DIR
+    shift
+  elif [ "$ARG" == "--borg-command" ]; then
+    shift
+    BORG_CMD="$1"
+    shift
+  elif [ "$ARG" == "--repository" ]; then
+    shift
+    BORG_REPO="$1"
+    if [ ! -d "$BORG_REPO" ]; then
+        echo_e "Check --repository parameter for a valid borg repository"
+        exit 1
+    fi
+    shift
+  elif [ "$ARG" == "--wait-process-name" ]; then
+    shift
+    WAIT_PROCESS_NAME="$1"
+    shift
+  elif [ "$ARG" == "--wait-sleep-time" ]; then
+    shift
+    WAIT_SLEEP_TIME="${1:-60}"
+    shift
+  elif [ "$ARG" == "--verbose" ]; then
+    VERBOSE=1
+    shift
+    if [[ ! $1 == -* ]] && [[ "$1" =~ [0-9]{1} ]]; then
+        VERBOSE=$1
+        shift
+    fi
+  elif [ "$ARG" == "--test" ]; then
+    DRY_RUN=1
+    VERBOSE=${VERBOSE:-1}
+    shift
+  elif [ "$ARG" == "--report" ]; then
+    REPORT=1
+    DRY_RUN=1
+    shift
+  elif [ "$ARG" == "--help" ]; then
+    helpmsg
+    exit 1
+  elif [ "$ARG" == "--" ]; then
+    shift
+    break
+  else
+    echo_e "Unrecognized argument: "$ARG
+    exit 1
+  fi
+done
+
+
+if [ -z "$1" ]; then
+    echo "Usage: $0 [--help|options] <purge_file>"
+    exit 1
+fi
+FILE="$1"
+if [ ! -f "$FILE" ]; then
+    echo "File does not exist ($FILE)!"
+    exit 1
+fi
+
+echo -n "[$(date)] Validating task file."
+# Validate Borg Repository
+BORG_REPO_FROM_TASK_FILE=
+if [ -z "$BORG_REPO" ]; then
+    THIS_LINE=$(head -1 $FILE);
+    if [[ "$THIS_LINE" =~ "::" ]]; then
+        BORG_REPO_FROM_TASK_FILE=$(echo $THIS_LINE| cut -d: -f1)
+        if [ -z "$BORG_REPO_FROM_TASK_FILE" ]; then
+            # THIS_LINE has empty BORG_REPO: "::ARCHIVE"
+            BORG_REPO_FROM_TASK_FILE=
+        elif [ ! -d "$BORG_REPO_FROM_TASK_FILE" ]; then
+            echo
+            echo_e "Invalid borg repository derived from task file as \"$BORG_REPO_FROM_TASK_FILE\"".
+            exit 1
+        fi
+    fi
+    if [ ! -z "BORG_REPO_FROM_TASK_FILE" ]; then
+        if [ ! -d "data" ] || [ -f "config" ]; then
+            echo
+            echo_e "The current directory is an invalid borg repository."
+            exit 1
+        fi
+    fi
+fi
+if [ ! -z "$BORG_REPO" ] && [ ! -z "$BORG_REPO_FROM_TASK_FILE" ]; then
+    echo "Error: Cannot provide a --repository and have it defined in the task file."
+    exit 1
+fi
+
+# Validate task file
+echo -n "."
+VALIDATION_ERROR=0
+while read -r line; do
+    echo -n "."
+    if [[ "$LINE" =~ "::" ]]; then
+        THIS_BORG_REPO="$(echo $line | cut -d: -f1)"
+        THIS_ARCHIVE="$(echo $line | cut -d: -f3)"
+        if [ ! -z "$BORG_REPO" ]; then
+          echo
+          echo_e "Error: [$line] Cannot provide a --repository and have it defined in the task file."
+          let VALIDATION_ERROR++
+          #continue
+        elif [ ! -d "$THIS_BORG_REPO" ]; then
+          echo
+          echo_e "Error: [$line] Invalid Borg Repository."
+          let VALIDATION_ERROR++
+        fi
+    else
+        THIS_ARCHIVE="$line"
+        # BORG_REPO was already validated on argument input --repository
+    fi
+done < "$FILE"
+if [[ "$VALIDATION_ERROR" -ge 1 ]]; then
+    echo_e "Error: Task file validation failed"
+    exit 1
+fi
+
+# Validation passed
+if [ -z "$BORG_REPO" ] && [ ! -z "$BORG_REPO_FROM_TASK_FILE" ]; then
+    BORG_REPO="$BORG_REPO_FROM_TASK_FILE"
+fi
+echo ".passed"
+
+# Begin task work
+echo "[$(date)] Starting purge_task with $FILE"
+if [[ $REPORT -eq 1 ]]; then
+    echo "[$(date)] Building archive list from Borg Repository for generating a report."
+    #BORG_REPO=$(head -1 $FILE| cut -d: -f1)
+    do_borg_list_archives_build $BORG_REPO
+fi
+while read -r line; do
+    if [[ "$LINE" =~ "::" ]]; then
+        [ ! -z "$BORG_REPO" ] && echo "Error: "
+        BORG_REPO="$(echo $line | cut -d: -f1)"
+        ARCHIVE="$(echo $line | cut -d: -f3)"
+    else
+        ARCHIVE="$line"
+    fi
+    [[ $REPORT -eq 1 ]] && do_borg_list_archive_exists "$ARCHIVE"
+    if [[ $DRY_RUN -ne 1 ]]; then
+        if [ ! -z "${WAIT_PROCESS_NAME}" ]; then
+            sleep 5
+            while ! does_process_not_run ${WAIT_PROCESS_NAME}; do
+                echo_p WAIT "Waiting for ${WAIT_PROCESS_NAME} to finish"
+                sleep ${WAIT_SLEEP_TIME}
+            done
+        fi
+    fi
+    if [[ $REPORT -ne 1 ]]; then
+        echo_p DELETE "Deleting Archives..."
+        echo_v "[$(date)] $BORG_REPO $ARCHIVE"
+        do_borg_delete_archive $ARCHIVE
+    fi
+done < "$FILE"
+
+if [[ $REPORT -eq 1 ]]; then
+    echo "[$(date)] Process Report"
+    for ARCHIVE in $( echo "${!REPO_ARCHIVES_LIST[@]}" | awk '{for(i=1; i<=NF; i++) print $i}' | sort --reverse ) ; do
+        if [[ ${REPO_ARCHIVES_LIST[${ARCHIVE}]} -eq 1 ]]; then
+            echo "[DELETE] ${ARCHIVE}";
+        elif [[ ${REPO_ARCHIVES_LIST[${ARCHIVE}]} -eq 2 ]]; then
+            echo "[******] ${ARCHIVE}";
+        else
+            echo "[SAVE]   ${ARCHIVE}";
+        fi
+    done
+fi
+
+echo "[$(date)] Completed purge_task with $FILE"
