@@ -278,7 +278,7 @@ if [ -z "$BORG_REPO" ]; then
             exit 1
         fi
     fi
-    if [ ! -z "BORG_REPO_FROM_TASK_FILE" ]; then
+    if [ -z "BORG_REPO_FROM_TASK_FILE" ]; then
         if [ ! -d "data" ] || [ -f "config" ]; then
             echo
             echo_e "The current directory is an invalid borg repository."
@@ -296,7 +296,7 @@ echo -n "."
 VALIDATION_ERROR=0
 while read -r line; do
     echo -n "."
-    if [[ "$LINE" =~ "::" ]]; then
+    if [[ "$line" =~ "::" ]]; then
         THIS_BORG_REPO="$(echo $line | cut -d: -f1)"
         THIS_ARCHIVE="$(echo $line | cut -d: -f3)"
         if [ ! -z "$BORG_REPO" ]; then
@@ -333,8 +333,7 @@ if [[ $REPORT -eq 1 ]]; then
     do_borg_list_archives_build $BORG_REPO
 fi
 while read -r line; do
-    if [[ "$LINE" =~ "::" ]]; then
-        [ ! -z "$BORG_REPO" ] && echo "Error: "
+    if [[ "$line" =~ "::" ]]; then
         BORG_REPO="$(echo $line | cut -d: -f1)"
         ARCHIVE="$(echo $line | cut -d: -f3)"
     else
