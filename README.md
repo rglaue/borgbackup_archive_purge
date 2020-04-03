@@ -91,7 +91,9 @@ disaster recovery purposes. There was a need to set the start date for pruning
 archives from the archived copy of the borg repository so that it maintains
 archives within a certain time range.
 
-##### Version 1.4
+##### Version 1.5
+* 1.5 - added `--create-task` option to create a purge-task file. The purge-task
+         file is then used with the new borg-purge-task program. (See README)
 * 1.4 - fix issue analyzing the next archive date when passing over a lower-class interval
          e.g. Monthly would not always archive correctly when a yearly archive was
          saved in between target months.
@@ -154,9 +156,9 @@ archive is kept.
     PURGE_MONTH_THRESHOLD=27
     PURGE_YEAR_THRESHOLD=352
 
-### Parameters and usage
+### borg-purge-archives - Parameters and usage
 
-    borg-purge-archives version 1.4
+    borg-purge-archives version 1.5
 
     This program will purge archives from a Borg Backup repository based on
     archival dates set in the archive name, e.g. daily-2019-08-01, rather than
@@ -167,6 +169,10 @@ archive is kept.
     --verbose [0-9]     Set the verbosity level
     --test              Show what would happen without doing it
                           this sets VERBOSE=1 if not set with --verbose
+    --create-task <F>   Create a task for deleting archives that will later
+                          be executed with the borg-purge-task command.
+                          e.g.: thisprog --create-task taskfile.txt
+                                borg-purge-task taskfile.txt
     --start-date <D>    Start on this date for evaluation, as though it was
                           today. Days after this date are purged. The string
                           <D> is any date recognized by the GNU date program.
@@ -234,6 +240,81 @@ for i in {0..1000}; do
         break
     fi
 done
+```
+
+### borg-purge-task - Parameters and usage
+
+    borg-purge-task version 1.5
+
+    This program will purge archives from a Borg Backup repository based on
+    a task file generated from "borg-purge-archives --create-task". It is 
+    designed to run in the background, and share procedural time on a borg
+    repository with other system processes that also want procedural time.
+
+    --help              This help message
+    --verbose [0-9]     Set the verbosity level
+    --test              Show what would happen without doing it
+                          this sets VERBOSE=1 if not set with --verbose
+    --report            Print out a report of the archives that would be
+                          deleted or saved (does not execute archive deletes)."
+    --borg-base-dir <s> Set the BORG_BASE_DIR environment variable. This
+                          directory is where borg looks for the .cache/ and
+                          .config/ directories for the repository.
+    --borg-command <s>  Set the path to borg and any other parameters that are
+                          desired to be passed in
+                          (Default: "/usr/bin/borg --lock-wait 18000")
+    --repository <dir>  The Borg repository to purge from. If not provided, the
+                          repository is derived from the task file. If
+                          additionally provided in the task file, an error is
+                          given about the conflict.
+    --wait-process-name <s>
+                        Wait for a process to finish that has this name before
+                          performing an archive delete. The purge procedure will
+                          pause between deletes if this process is running. 
+    --wait-sleep-time <i>
+                       (Default: 60) Time to wait (sleep) between archive
+                          deletes to allow for checking if the
+                          wait-process-name is running
+
+    WAIT PROCEDURE
+    Another process, like a backup, is needed to run in a timely fashion with
+    Borg. The --wait-x arguments allow the purge-task to watch, and then pause
+    what it is doing, if watch-process-name is running. The wait-sleep-time
+    causes purge-task to wait between archive deletes to allow time for the
+    wait-process-name to begin running.
+    I deally the backup procedure is using a "borg --lock-wait", so it will
+    wait for purge-task to finish if it is executing a delete. The backup
+    procedure will then execute its task, and purge-task will wait for the
+    backup procedure to complete before purge-task continues.
+
+#### Purge Task
+
+The `--create-task` option is used to create a purge-task file. The purge-task
+file is then used with the new borg-purge-task program to run the purge
+procedure in a process that **could** run in the background and **potentially**
+not intefere with borgbackup or other procedures.
+
+It **could** run in the background and **potentially** not intefere because of
+how borg-puge-task operates in regards to its `--wait-process-name` option.
+
+Each archive listed in the task file is deleted one at a time from the borg
+repository. In between the delete procedure, the system is checked to see if
+`--wait-process-name` is running. If it is running, then it will wait 
+`--wait-sleep-time` seconds to check again. If the process is not running,
+then the next borg archive delete is executed.
+
+If there are a lot of archives to purge, borg-purge-task can run at any time.
+If a backup procedure process name is provided in `--wait-process-name`, then
+borg-purge-task will wait for it to complete before continuing its task of
+deleting borg archives.
+
+```bash
+  Usage: borg-purge-task [--help|options] <purge_file>
+```
+
+```bash
+  borg-purge-archive --verbose --create-task taskfile.txt
+  borg-purge-task --wait-process-name borg taskfile.txt
 ```
 
 ## Note about creating copies of borg repositories

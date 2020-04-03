@@ -5,8 +5,8 @@
 #   Uses a parsed date in the archive name, opposed to the date stored in the
 #   borg db for when it was created, which `borg --purge` uses.
 #
-# reg/20191206
-VERSION="1.4"
+# reg/20200220
+VERSION="1.5"
 #####
 # Configuration
 #
@@ -78,6 +78,10 @@ cat<<'HELPEOF'
     --verbose [0-9]     Set the verbosity level
     --test		Show what would happen without doing it
                           this sets VERBOSE=1 if not set with --verbose
+    --create-task <F>   Create a task for deleting archives that will later
+                          be executed with the borg-purge-task command.
+                          e.g.: thisprog --create-task taskfile.txt
+                                borg-purge-task taskfile.txt
     --start-date <D>    Start on this date for evaluation, as though it was
                           today. Days after this date are purged. The string
                           <D> is any date recognized by the GNU date program.
@@ -169,6 +173,7 @@ while [[ $1 == -* ]]; do
     SIM_POPULATE=1
   elif [ "$ARG" == "--borg-base-dir" ]; then
     shift
+    # Could use  BORG_BASE_DIR="$(readlink -f "$1")"
     BORG_BASE_DIR="$1"
     if [ ! -d "$BORG_BASE_DIR/.cache" ] || [ ! -d "$BORG_BASE_DIR/.config" ]; then
         echo_e "[WARN] one or both of .cache and .config not found in [BORG_BASE_DIR]$BORG_BASE_DIR"
@@ -178,6 +183,15 @@ while [[ $1 == -* ]]; do
   elif [ "$ARG" == "--borg-command" ]; then
     shift
     BORG_CMD="$1"
+    shift
+  elif [ "$ARG" == "--create-task" ]; then
+    shift
+    TASK_FILE="$1"
+    echo -e "" > ${TASK_FILE}
+    if [[ "$?" -ge 1 ]]; then
+        echo_e "[ERROR] Task file \"$TASK_FILE\" could not be created."
+        exit 1
+    fi
     shift
   elif [ "$ARG" == "--start-date" ]; then
     shift
@@ -297,6 +311,15 @@ do_borg_delete_archive () {
                 return 0
             fi
             echo_t "$BORG_CMD delete $BORG_REPO::$ARCHIVE"
+        elif [ ! -z "$TASK_FILE" ]; then
+            if [ -f "$TASK_FILE" ]; then
+                echo_v "  (task_delete) $BORG_REPO::$ARCHIVE"
+                echo "$BORG_REPO::$ARCHIVE" >> $TASK_FILE
+                return 0
+            else
+                echo_e "Task file "$TASK_FILE" does not exist!"
+                return 1
+            fi
         else
             if [[ $SIMULATE -eq 1 ]]; then
                 local FLAG=""
@@ -640,6 +663,9 @@ for ARCHIVE in $(do_borg_archive_list) ; do
             # Else no archive available during the backup window
             do_adjust_dates_year $DAYSAGO
         fi
+    elif [ ! -z "$CANDIDATE_YEARLY" ]; then
+        # cleanup, because yearly range has expired
+        do_analyze_keep yearly ""
     fi
 
     if [[ $DAYSAGO -le $KEEP_MONTHS ]]; then
@@ -660,6 +686,9 @@ for ARCHIVE in $(do_borg_archive_list) ; do
             do_adjust_dates_month $DAYSAGO
         fi
         do_adjust_dates_year $DAYSAGO
+    elif [ ! -z "$CANDIDATE_MONTHLY" ]; then
+        # cleanup, because monthly range has expired
+        do_analyze_keep monthly ""
     fi
 
     if [[ $DAYSAGO -le $KEEP_WEEKS ]]; then
@@ -685,6 +714,9 @@ for ARCHIVE in $(do_borg_archive_list) ; do
         fi
         do_adjust_dates_month $DAYSAGO
         do_adjust_dates_year $DAYSAGO
+    elif [ ! -z "$CANDIDATE_WEEKLY" ]; then
+        # cleanup, because weekly range has expired
+        do_analyze_keep weekly ""
     fi
 
     do_analyze_delete $ARCHIVE
