@@ -5,8 +5,8 @@
 #   Uses a parsed date in the archive name, opposed to the date stored in the
 #   borg db for when it was created, which `borg --purge` uses.
 #
-# reg/20200220
-VERSION="1.5"
+# reg/20200504
+VERSION="1.6"
 #####
 # Configuration
 #
@@ -187,7 +187,7 @@ while [[ $1 == -* ]]; do
   elif [ "$ARG" == "--create-task" ]; then
     shift
     TASK_FILE="$1"
-    echo -e "" > ${TASK_FILE}
+    echo -n "" > ${TASK_FILE}
     if [[ "$?" -ge 1 ]]; then
         echo_e "[ERROR] Task file \"$TASK_FILE\" could not be created."
         exit 1

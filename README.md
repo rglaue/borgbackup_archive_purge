@@ -91,7 +91,8 @@ disaster recovery purposes. There was a need to set the start date for pruning
 archives from the archived copy of the borg repository so that it maintains
 archives within a certain time range.
 
-##### Version 1.5
+##### Version 1.6
+* 1.6 - fixed issue where `--create-task` inserted a newline at beginning of task file.
 * 1.5 - added `--create-task` option to create a purge-task file. The purge-task
          file is then used with the new borg-purge-task program. (See README)
 * 1.4 - fix issue analyzing the next archive date when passing over a lower-class interval
@@ -119,6 +120,14 @@ Currently only general options are configurable with arguments. The options
 for configuring preferred keep days and thresholds are configured inside the
 script. This is intended to change as this program continues to mature the
 use of daily, weekly, monthly, yearly keep and threshold values.
+
+### Naming the borg archives
+
+When creating the archives in borg, the ending suffix of the name should be
+YYYY-MM-DD. The beginning prefix of the name does not matter, though having a
+prefix is recommended. For example ``archive-daily-2020-05-04``. The
+``2020-05-04`` suffix is extracted from the name for use in
+``borg-purge-archives``.
 
 ### Configuring daily, weekly, monthly, yearly keep and threshold values
 
@@ -158,7 +167,7 @@ archive is kept.
 
 ### borg-purge-archives - Parameters and usage
 
-    borg-purge-archives version 1.5
+    borg-purge-archives version 1.6
 
     This program will purge archives from a Borg Backup repository based on
     archival dates set in the archive name, e.g. daily-2019-08-01, rather than
@@ -244,7 +253,7 @@ done
 
 ### borg-purge-task - Parameters and usage
 
-    borg-purge-task version 1.5
+    borg-purge-task version 1.6
 
     This program will purge archives from a Borg Backup repository based on
     a task file generated from "borg-purge-archives --create-task". It is 

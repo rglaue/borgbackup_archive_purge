@@ -3,8 +3,8 @@
 #
 # borg-purge-task deletes archives listed in a task file
 #
-# reg/20200318
-VERSION="1.5"
+# reg/20200504
+VERSION="1.6"
 #####
 # Configuration
 VERBOSE=1
@@ -278,7 +278,7 @@ if [ -z "$BORG_REPO" ]; then
             exit 1
         fi
     fi
-    if [ -z "BORG_REPO_FROM_TASK_FILE" ]; then
+    if [ -z "$BORG_REPO_FROM_TASK_FILE" ]; then
         if [ ! -d "data" ] || [ -f "config" ]; then
             echo
             echo_e "The current directory is an invalid borg repository."
@@ -343,7 +343,7 @@ while read -r line; do
     if [[ $DRY_RUN -ne 1 ]]; then
         if [ ! -z "${WAIT_PROCESS_NAME}" ]; then
             sleep 5
-            while ! does_process_not_run ${WAIT_PROCESS_NAME}; do
+            while ! does_process_not_run "${WAIT_PROCESS_NAME}"; do
                 echo_p WAIT "Waiting for ${WAIT_PROCESS_NAME} to finish"
                 sleep ${WAIT_SLEEP_TIME}
             done
